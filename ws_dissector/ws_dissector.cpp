@@ -149,6 +149,17 @@ int main(int argc, char** argv)
         break;
     }
     prefs_apply_all();
+    
+   // ws_dissector.cpp, after the existing user_dlts block (~line 151)
+switch (prefs_set_pref(const_cast<char*>("nas-5gs.null_decipher:TRUE"), &errmsg)) {
+case PREFS_SET_OK:
+    break;
+default:
+    fprintf(stderr, "Failed to set nas-5gs.null_decipher.\n");
+    return 1;
+}
+prefs_apply_all();   // re-apply after both prefs are set
+
 
     while (!feof(stdin)) {  // stop dissect when the pipe is closed
         fflush(stdin);

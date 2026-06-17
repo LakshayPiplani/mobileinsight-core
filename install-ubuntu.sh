@@ -104,6 +104,12 @@ if [ -e "ws_dissector" ]; then
 fi
 g++ ws_dissector.cpp packet-aww.cpp -o ws_dissector `pkg-config --libs --cflags glib-2.0` \
     -I"${WIRESHARK_SRC_PATH}" -L"${PREFIX}/lib" -lwireshark -lwsutil -lwiretap
+
+if [ $? != 0 ]; then
+    echo "Error when compiling ws_dissector."
+    echo "You need to manually fix it before continuation. Exiting with status 5"
+    exit 5
+fi
 strip ws_dissector
 
 echo "Installing Wireshark dissector to ${PREFIX}/bin"
