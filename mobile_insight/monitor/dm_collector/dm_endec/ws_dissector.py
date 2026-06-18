@@ -125,6 +125,7 @@ class WSDissector:
                                      bufsize=-1,
                                      stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE,
+                                     stderr = subprocess.PIPE,
                                      env=env
                                      )
         cls._init_proc_called = True
@@ -156,9 +157,20 @@ class WSDissector:
             len(b),
         )
         input_data += b
-
-        cls._proc.stdin.write(input_data)
-        cls._proc.stdin.flush()
+        try:
+            cls._proc.stdin.write(input_data)
+            cls._proc.stdin.flush()
+        except: 
+            returncode = cls._proc.poll()
+            stderr_output = b""
+            if cls._proc.stderr:
+                stderr_output = cls._proc.stderr.read()
+            print("MI(ERROR) ws_dissector died. msg_type=%s len=%d returncode=%s" %
+                (msg_type, len(b), returncode))
+            print("MI(ERROR) offending bytes: %s" % binascii.hexlify(b))
+            if stderr_output:
+                print("MI(ERROR) ws_dissector stderr: %s" % stderr_output.decode(errors="replace"))
+            raise
         result = []
         while True:
             line = cls._proc.stdout.readline().decode("utf-8")
