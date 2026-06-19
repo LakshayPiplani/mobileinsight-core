@@ -25,8 +25,8 @@ PREFIX=/usr/local
 MOBILEINSIGHT_PATH=$(pwd)
 WIRESHARK_SRC_PATH=${MOBILEINSIGHT_PATH}/wireshark-${ws_ver}
 
-PYTHON=python3
-PIP=pip3
+PYTHON=/usr/local/bin/python3.7
+PIP="/usr/local/bin/python3.7 -m pip"
 
 echo "Installing dependencies for compiling Wireshark libraries"
 sudo apt-get -y install cmake pkg-config wget libglib2.0-dev bison flex libpcap-dev libgcrypt-dev qt5-default qttools5-dev qtmultimedia5-dev libqt5svg5-dev libc-ares-dev libsdl2-mixer-2.0-0 libsdl2-image-2.0-0 libsdl2-2.0-0
@@ -44,7 +44,7 @@ fi
 
 echo "Configuring Wireshark sources for ws_dissector compilation..."
 cd ${WIRESHARK_SRC_PATH}
-cmake -DBUILD_wireshark=OFF . > /dev/null 2>&1
+cmake -DBUILD_wireshark=ON . > /dev/null 2>&1
 if [ $? != 0 ]; then
     echo "Error when executing '${WIRESHARK_SRC_PATH}/cmake --disable-wireshark .'"
     echo "You need to manually fix it before continuation. Exiting with status 3"

@@ -1,1 +1,1 @@
-python3 /usr/local/share/mobileinsight/mobile_insight_gui.py
+/usr/local/bin/python3.7 /usr/local/share/mobileinsight/mobile_insight_gui.py
