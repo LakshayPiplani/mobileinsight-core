@@ -15,7 +15,7 @@ if __name__ == "__main__":
 
     # Initialize a monitor
     src = OfflineReplayer()
-    src.set_input_path("./logs/")
+    src.set_input_path("/vagrant/EA0-lp.mi2log")
     # src.enable_log_all()
 
     src.enable_log("LTE_PHY_Serv_Cell_Measurement")
@@ -26,7 +26,7 @@ if __name__ == "__main__":
     logger = MsgLogger()
     logger.set_decode_format(MsgLogger.XML)
     logger.set_dump_type(MsgLogger.FILE_ONLY)
-    logger.save_decoded_msg_as("./test.txt")
+    logger.save_decoded_msg_as("./decoded-EA0-lp.txt")
     logger.set_source(src)
 
     # # Analyzers
