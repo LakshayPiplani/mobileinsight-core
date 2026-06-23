@@ -150,8 +150,9 @@ int main(int argc, char** argv)
     }
     prefs_apply_all();
     
-   // ws_dissector.cpp, after the existing user_dlts block (~line 151)
-switch (prefs_set_pref(const_cast<char*>("nas-5gs.null_decipher:TRUE"), &errmsg)) {
+
+char nas5gs_pref[] = "nas-5gs.null_decipher:TRUE";
+switch (prefs_set_pref(nas5gs_pref, &errmsg)) {
 case PREFS_SET_OK:
     break;
 default:
