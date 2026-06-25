@@ -180,7 +180,7 @@ class AndroidDevDiagMonitor(Monitor):
     """
 
     # SUPPORTED_TYPES: a list containing the currently supported message types.
-    SUPPORTED_TYPES = set(dm_collector_c.log_packet_types)
+    SUPPORTED_TYPES = set(dm_collector_c.log_packet_types) ## Refer to ./dm_collector/consts.h. Also, dm_collector_c.log_packet_types is set in dm_collector_c.cpp: PyInit_dm_collector_c()
 
     # DIAG_CFG_DIR = "/sdcard/diag_logs"
     DIAG_CFG_DIR = get_cache_dir()

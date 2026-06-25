@@ -12229,6 +12229,15 @@ on_demand_decode (const char *b, size_t length, LogPacketType type_id, PyObject*
                                      b, offset, length, result);
             offset += _decode_nr_nas_sm5g_plain_ota_msg(b, offset, length, result);
             break;
+                case NR_NAS_MM5G_Plain_OTA_Incoming_Msg:
+        case NR_NAS_MM5G_Plain_OTA_Outgoing_Msg:
+        case NR_NAS_MM5G_Plain_OTA_Container_Msg:
+            offset += _decode_by_fmt(NrNasSm5gPlainOtaMsgFmt,
+                                     ARRAY_SIZE(NrNasSm5gPlainOtaMsgFmt, Fmt),
+                                     b, offset, length, result);
+            offset += _decode_nr_nas_sm5g_plain_ota_msg(b, offset, length, result);
+            break;
+
         case NR_L2_UL_BSR:
             offset += _decode_by_fmt(NRL2ULBSR_Fmt,
                                      ARRAY_SIZE(NRL2ULBSR_Fmt, Fmt),
