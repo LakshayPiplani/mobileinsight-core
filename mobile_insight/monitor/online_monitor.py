@@ -78,9 +78,9 @@ try:
     if chipset_type == ChipsetType.QUALCOMM:
         from .android_dev_diag_monitor import AndroidDevDiagMonitor
 
-
         class OnlineMonitor(AndroidDevDiagMonitor):
             def __init__(self):
+                print("QUALCOMM chipset identified. Using Monitor sub-class %s \n" % self.__class__.__bases__[0].__name__)
                 AndroidDevDiagMonitor.__init__(self)
 
             def set_serial_port(self, phy_ser_name):
@@ -106,6 +106,7 @@ try:
 
         class OnlineMonitor(AndroidMtkMonitor):
             def __init__(self):
+                print("MTK chipset identified. Using Monitor sub-class %s \n" % self.__class__.__bases__[0].__name__)
                 AndroidMtkMonitor.__init__(self)
 
             def set_serial_port(self, phy_ser_name):
@@ -131,6 +132,7 @@ try:
 
         class OnlineMonitor(Monitor):
             def __init__(self):
+                print("Could not identify chipset. Using Monitor sub-class %s \n" % self.__class__.__bases__[0].__name__)
                 Monitor.__init__(self)
                 self.log_warning("Unsupported chipset type")
 
@@ -165,4 +167,5 @@ except Exception as e:
 
     class OnlineMonitor(DMCollector):
         def __init__(self):
+            print("Inside except block. Using DMCollector style Monitor %s \n" % self.__class__.__bases__[0].__name__)
             DMCollector.__init__(self)
