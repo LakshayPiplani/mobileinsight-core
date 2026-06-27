@@ -13,6 +13,7 @@ from datetime import *
 import json
 import struct
 import xml.etree.ElementTree as ET
+from .lp_debug import dump_message
 
 try:
     from utils import *
@@ -60,6 +61,8 @@ class DMLogPacket:
     """
 
     _init_called = False
+    nas_mm_filename = "./lp_nas_mm.txt"
+    print("LOG FILE FOR NAS MM: %s\n" % nas_mm_filename)
 
     def __init__(self, decoded_list):
         """
@@ -78,6 +81,7 @@ class DMLogPacket:
         self.decoded_cache = None
         self.decoded_xml_cache = None
         self.decoded_json_cache = None
+
 
     def get_type_id(self):
         return self._type_id
@@ -100,6 +104,7 @@ class DMLogPacket:
         type_id = ""
         try:
             # for i in range(len(decoded_list)):
+            nass_mm_fd = open(cls.nas_mm_filename, "a", encoding="utf-8")
             i = 0
             while i < len(decoded_list):
                 field_name, val, type_str = decoded_list[i]
@@ -108,6 +113,8 @@ class DMLogPacket:
                 if type_str.startswith("raw_msg/"):
                     msg_type = type_str[len("raw_msg/"):]
                     decoded = cls._decode_msg(msg_type, val)
+                    if type_id in ("5G_NR_NAS_MM_Plain_OTA_Incoming_Msg", "5G_NR_NAS_MM_Plain_OTA_Outgoing_Msg", "5G_NR_NAS_MM5G_Plain_OTA_Container_Msg"):
+                        dump_message(fd=cls.nass_mm_fd, type_id = type_id, raw_msg = val.hex(' '), decoded_msg = decoded)
                     xmls = [decoded, ]
 
                     if msg_type == "RRC_DL_BCCH_BCH":
@@ -178,6 +185,8 @@ class DMLogPacket:
                 i += 1
             import traceback
             raise RuntimeError(str(traceback.format_exc()))
+        finally:
+            nass_mm_fd.close()
 
     @classmethod
     def _parse_internal_list(cls, out_type, decoded_list):
