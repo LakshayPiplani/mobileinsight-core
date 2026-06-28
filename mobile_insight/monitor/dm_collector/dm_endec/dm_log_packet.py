@@ -112,9 +112,12 @@ class DMLogPacket:
                     type_id = val
                 if type_str.startswith("raw_msg/"):
                     msg_type = type_str[len("raw_msg/"):]
+                    print("Calling ws dissector for message type ", msg_type, " / ", type_id, "\n")
                     decoded = cls._decode_msg(msg_type, val)
                     if type_id in ("5G_NR_NAS_MM_Plain_OTA_Incoming_Msg", "5G_NR_NAS_MM_Plain_OTA_Outgoing_Msg", "5G_NR_NAS_MM5G_Plain_OTA_Container_Msg"):
-                        dump_message(fd=cls.nass_mm_fd, type_id = type_id, raw_msg = val.hex(' '), decoded_msg = decoded)
+                        print("Attempting to print the raw bytes and ws_dissected message for type id ", type_id, "\n")
+                        raw_msg = ' '.join(f'{b:02x}' for b in val)
+                        dump_message(fd=nass_mm_fd, type_id = type_id, raw_msg = raw_msg, decoded_msg = decoded)
                     xmls = [decoded, ]
 
                     if msg_type == "RRC_DL_BCCH_BCH":
@@ -176,6 +179,7 @@ class DMLogPacket:
             return lst, type_id
 
         except Exception as e:
+            print(f"Encountered exception type: {type(e).__name__} \nException Message: {e}")
             print((len(decoded_list)))
             print(decoded_list)
             i = 0
@@ -186,7 +190,7 @@ class DMLogPacket:
             import traceback
             raise RuntimeError(str(traceback.format_exc()))
         finally:
-            nass_mm_fd.close()
+            (getattr(nass_mm_fd, "close", None) or (lambda: None))()
 
     @classmethod
     def _parse_internal_list(cls, out_type, decoded_list):
