@@ -478,7 +478,9 @@ class WindowClass(wx.Frame):
         skip_context=["geninfo","frame","user_dlt"]#proto which is useless
         for p in proto:
             if (p.get("hide") != "yes" and p.get("name") not in skip_context):
-                dict_msg.update(self.parse_msg_field(p))
+                proto_name = p.get("showname") or p.get("name") or "unknown"
+                dict_msg[proto_name] = self.parse_msg_field(p)
+                # dict_msg.update(self.parse_msg_field(p))
             else:
                 continue
         return dict_msg
