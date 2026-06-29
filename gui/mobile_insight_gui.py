@@ -473,7 +473,7 @@ class WindowClass(wx.Frame):
         :param msgroot:
         :return:
         '''
-        proto = msgroot.findall(".//proto")
+        proto = msgroot.findall("./msg/packet/proto")
         dict_msg = {}
         skip_context=["geninfo","frame","user_dlt"]#proto which is useless
         for p in proto:
