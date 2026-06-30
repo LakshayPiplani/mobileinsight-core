@@ -159,7 +159,7 @@ class WSDissector:
         input_data += b
 
         try:
-            print("Running try on BrokenPipe\n")
+            #print("Running try on BrokenPipe\n")
             cls._proc.stdin.write(input_data)
             cls._proc.stdin.flush()
         except BrokenPipeError as exc: 
