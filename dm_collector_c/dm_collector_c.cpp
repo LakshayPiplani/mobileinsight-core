@@ -771,6 +771,12 @@ dm_collector_c_receive_log_packet(PyObject *self, PyObject *args) {
                 continue;
             }
         } else {
+            if (success && !crc_correct) {
+                fprintf(stderr, "MI(PACKET FAIL) dropped frame of %zu bytes", frame.size());
+                for (size_t i = 0; i < frame.size(); i++)
+                    fprintf(stderr, "%02x ", (unsigned char)frame[i]);
+                fprintf(stderr, "\n");
+            }
             continue;
         }
     }
