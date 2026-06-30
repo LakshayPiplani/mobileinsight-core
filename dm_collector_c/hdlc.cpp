@@ -138,6 +138,7 @@ get_next_frame (std::string& output_frame, bool& crc_correct) {
 
     unescape(output_frame);
     print_hex("MI(FRAME) delimiter found, extracted frame", output_frame);
+    print_hex("MI(LEFTOVER) buffer remaining after this frame was processed", buffer)
     if (output_frame.size() <= 2) {
         crc_correct = false;
         return true;
