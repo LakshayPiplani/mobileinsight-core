@@ -100,6 +100,8 @@ class MsgLogger(Analyzer):
         date = datetime.datetime.fromtimestamp(
             msg.timestamp).strftime('%Y-%m-%d %H:%M:%S.%f')
         # self.log_info(date+':'+msg.type_id)
+        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+        self.log_info("Time of message logging is {}\n".format(now))
         decoded_msg = ""
         if self.decode_type == self.XML:
             decoded_msg = msg.data.decode_xml()
