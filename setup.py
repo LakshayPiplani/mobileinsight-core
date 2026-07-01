@@ -39,6 +39,7 @@ for key, value in list(cfg_vars.items()):
 
 dm_collector_c_module = Extension('mobile_insight.monitor.dm_collector.dm_collector_c',
                                   sources=["dm_collector_c/dm_collector_c.cpp",
+                                           "dm_collector_c/serial_port.cpp",
                                            "dm_collector_c/export_manager.cpp",
                                            "dm_collector_c/hdlc.cpp",
                                            "dm_collector_c/log_config.cpp",

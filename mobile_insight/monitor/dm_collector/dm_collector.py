@@ -14,7 +14,6 @@ from ..monitor import *
 import binascii
 import os
 import optparse
-import serial
 import sys
 import timeit
 
@@ -125,23 +124,25 @@ class DMCollector(Monitor):
         print(("PHY BAUD RATE: %d" % self.phy_baudrate))
 
         try:
-            # Open COM ports
-            phy_ser = serial.Serial(self.phy_ser_name,
-                                    baudrate=self.phy_baudrate,
-                                    timeout=None, rtscts=True, dsrdtr=True)
+            # Open the serial port via the C++ layer (no more pyserial here).
+            # dm_collector_c.open_serial() configures baud rate, raw mode, and
+            # RTS/CTS flow control using POSIX termios.
+            self.log_debug("Opening serial port %s at %d baud" % (self.phy_ser_name, self.phy_baudrate))
+            dm_collector_c.open_serial(self.phy_ser_name, self.phy_baudrate)
 
             # Disable logs
-            self.log_debug("Disable logs") 
-            dm_collector_c.disable_logs(phy_ser)
+            self.log_debug("Disable logs")
+            dm_collector_c.disable_logs()
 
             # Enable logs
             self.log_debug("Enable logs")
-            dm_collector_c.enable_logs(phy_ser, self._type_names)
+            dm_collector_c.enable_logs(self._type_names)
 
-            # Read log packets from serial port and decode their contents
+            # Read log packets from serial port and decode their contents.
+            # dm_collector_c.read_serial(n) blocks until n bytes arrive and
+            # returns a Python bytes object — same contract as serial.read(n).
             while True:
-                s = phy_ser.read(64)
-                # s = phy_ser.read(1)
+                s = dm_collector_c.read_serial(64)
                 dm_collector_c.feed_binary(s)
 
                 decoded = dm_collector_c.receive_log_packet(self._skip_decoding,
@@ -169,9 +170,8 @@ class DMCollector(Monitor):
 
         except (KeyboardInterrupt, RuntimeError) as e:
             print(("\n\n%s Detected: Disabling all logs" % type(e).__name__))
-            # Disable logs
-            dm_collector_c.disable_logs(phy_ser)
-            phy_ser.close()
+            dm_collector_c.disable_logs()
+            dm_collector_c.close_serial()
             sys.exit(e)
         except Exception as e:
             sys.exit(e)

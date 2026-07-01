@@ -12,6 +12,7 @@
 #include "log_config.h"
 #include "log_packet.h"
 #include "export_manager.h"
+#include "serial_port.h"
 
 #include <string>
 #include <vector>
@@ -36,6 +37,18 @@
 // Global variable to control exportation of raw log
 static ExportManagerState g_emanager;
 
+// Global serial port instance.
+// Having one global matches the existing singleton pattern in this module
+// (there is also only one g_emanager, one HDLC buffer, etc.).
+// A single DM port per process is the expected usage.
+static SerialPort g_serial_port;
+
+static PyObject *dm_collector_c_open_serial(PyObject *self, PyObject *args);
+
+static PyObject *dm_collector_c_close_serial(PyObject *self, PyObject *args);
+
+static PyObject *dm_collector_c_read_serial(PyObject *self, PyObject *args);
+
 static PyObject *dm_collector_c_disable_logs(PyObject *self, PyObject *args);
 
 static PyObject *dm_collector_c_enable_logs(PyObject *self, PyObject *args);
@@ -55,6 +68,28 @@ static PyObject *dm_collector_c_receive_log_packet(PyObject *self, PyObject *arg
 static PyObject *dm_collector_c_set_sampling_rate(PyObject *self, PyObject *args);
 
 static PyMethodDef DmCollectorCMethods[] = {
+        {"open_serial",         dm_collector_c_open_serial,         METH_VARARGS,
+                                                                       "Open a serial port.\n"
+                                                                       "\n"
+                                                                       "Args:\n"
+                                                                       "    path: device path string (e.g. '/dev/ttyUSB0').\n"
+                                                                       "    baud_rate: integer baud rate (e.g. 9600).\n"
+                                                                       "\n"
+                                                                       "Returns:\n"
+                                                                       "    True on success, raises RuntimeError on failure.\n"
+        },
+        {"close_serial",        dm_collector_c_close_serial,        METH_VARARGS,
+                                                                       "Close the currently open serial port.\n"
+        },
+        {"read_serial",         dm_collector_c_read_serial,         METH_VARARGS,
+                                                                       "Read bytes from the serial port.\n"
+                                                                       "\n"
+                                                                       "Args:\n"
+                                                                       "    n: number of bytes to read.\n"
+                                                                       "\n"
+                                                                       "Returns:\n"
+                                                                       "    A bytes object containing the data read.\n"
+        },
         {"disable_logs",        dm_collector_c_disable_logs,        METH_VARARGS,
                                                                        "Disable logs for a serial port.\n"
                                                                        "\n"
@@ -180,14 +215,26 @@ check_serial_port(PyObject *o) {
     return PyObject_HasAttrString(o, "read");
 }
 
+// send_msg_to_pyobj() is the original send path, kept for generate_diag_cfg
+// which still writes to a Python file object (not the live serial port).
+// It calls Python's .write() method via the C API.
 static bool
-send_msg(PyObject *serial_port, const char *b, int length) {
+send_msg_to_pyobj(PyObject *pyobj, const char *b, int length) {
     std::string frame = encode_hdlc_frame(b, length);
-    PyObject *o = PyObject_CallMethod(serial_port,
+    PyObject *o = PyObject_CallMethod(pyobj,
                                       (char *) "write",
                                       (char *) "y#", frame.c_str(), frame.size());
     Py_DECREF(o);
     return true;
+}
+
+// send_msg() is the new path: encodes as HDLC and writes straight to the
+// C++ serial port fd, no Python object involved.
+static bool
+send_msg(const char *b, int length) {
+    std::string frame = encode_hdlc_frame(b, length);
+    ssize_t written = g_serial_port.write(frame.c_str(), frame.size());
+    return written >= 0;
 }
 
 #ifndef _WIN32
@@ -206,37 +253,82 @@ get_posix_timestamp () {
 }
 #endif
 
+// =============================================================================
+// New Python-callable functions that expose g_serial_port to Python
+// =============================================================================
+
+// dm_collector_c.open_serial(path, baud_rate)
+// Opens the serial port.  Must be called before disable_logs / enable_logs.
+static PyObject *
+dm_collector_c_open_serial(PyObject *self, PyObject *args) {
+    (void) self;
+    const char *path;
+    int baud_rate;
+
+    // "si" format: one string, one int
+    if (!PyArg_ParseTuple(args, "si", &path, &baud_rate)) {
+        return NULL;
+    }
+
+    if (!g_serial_port.open(path, baud_rate)) {
+        PyErr_Format(PyExc_RuntimeError,
+                     "Failed to open serial port '%s' at %d baud", path, baud_rate);
+        return NULL;
+    }
+    Py_RETURN_TRUE;
+}
+
+// dm_collector_c.close_serial()
+// Closes g_serial_port.  Safe to call even if not open.
+static PyObject *
+dm_collector_c_close_serial(PyObject *self, PyObject *args) {
+    (void) self;
+    (void) args;
+    g_serial_port.close();
+    Py_RETURN_NONE;
+}
+
+// dm_collector_c.read_serial(n)
+// Reads up to n bytes from g_serial_port.  Blocks until data arrives.
+// Returns a Python bytes object.
+static PyObject *
+dm_collector_c_read_serial(PyObject *self, PyObject *args) {
+    (void) self;
+    int n;
+
+    if (!PyArg_ParseTuple(args, "i", &n)) {
+        return NULL;
+    }
+
+    // Allocate a temporary buffer on the stack for small reads (n <= 4096),
+    // or heap for larger ones.  For the current 64-byte reads this is fine.
+    std::vector<char> buf(n);
+    ssize_t got = g_serial_port.read(buf.data(), n);
+    if (got < 0) {
+        PyErr_SetFromErrno(PyExc_OSError);
+        return NULL;
+    }
+
+    // "y#" builds a Python bytes object from (const char*, Py_ssize_t)
+    return PyBytes_FromStringAndSize(buf.data(), got);
+}
+
 // Return: successful or not
+// NOTE: serial port argument removed — g_serial_port is used directly.
+// Call dm_collector_c.open_serial() before this.
 static PyObject *
 dm_collector_c_disable_logs(PyObject *self, PyObject *args) {
     (void) self;
+    (void) args;   // no arguments expected from Python anymore
     IdVector empty;
-    BinaryBuffer buf;
-    PyObject *serial_port = NULL;
-    if (!PyArg_ParseTuple(args, "O", &serial_port)) {
-        return NULL;
-    }
-    Py_INCREF(serial_port);
 
-    // Check arguments
-    if (!check_serial_port(serial_port)) {
-        PyErr_SetString(PyExc_TypeError, "\'port\' is not a serial port.");
-        goto raise_exception;
-    }
-
-    buf = encode_log_config(DISABLE, empty);
+    BinaryBuffer buf = encode_log_config(DISABLE, empty);
     if (buf.first == NULL || buf.second == 0) {
-        Py_DECREF(serial_port);
         Py_RETURN_FALSE;
     }
-    (void) send_msg(serial_port, buf.first, buf.second);
-    Py_DECREF(serial_port);
+    (void) send_msg(buf.first, buf.second);
     delete[] buf.first;
     Py_RETURN_TRUE;
-
-    raise_exception:
-    Py_DECREF(serial_port);
-    return NULL;
 }
 
 // Converts type names to a vector of IDs.
@@ -308,7 +400,7 @@ generate_log_config_msgs(PyObject *file_or_serial, PyObject *type_names) {
         // Enable WCDMA debug
         buf = encode_log_config(DEBUG_WCDMA_L1, type_ids);
         if (buf.first != NULL && buf.second != 0) {
-            (void) send_msg(file_or_serial, buf.first, buf.second);
+            (void) send_msg_to_pyobj(file_or_serial, buf.first, buf.second);
             delete[] buf.first;
         } else {
             PyErr_SetString(PyExc_RuntimeError, "Log config msg failed to encode.");
@@ -324,7 +416,7 @@ generate_log_config_msgs(PyObject *file_or_serial, PyObject *type_names) {
         const IdVector &v = type_id_vectors[i];
         buf = encode_log_config(SET_MASK, v);
         if (buf.first != NULL && buf.second != 0) {
-            (void) send_msg(file_or_serial, buf.first, buf.second);
+            (void) send_msg_to_pyobj(file_or_serial, buf.first, buf.second);
             delete[] buf.first;
         } else {
             PyErr_SetString(PyExc_RuntimeError, "Log config msg failed to encode.");
@@ -384,7 +476,7 @@ generate_log_config_headers(PyObject *file_or_serial, PyObject *type_names) {
                 break;
         }
         if (buf.first != NULL && buf.second != 0) {
-            (void) send_msg(file_or_serial, buf.first, buf.second);
+            (void) send_msg_to_pyobj(file_or_serial, buf.first, buf.second);
             delete[] buf.first;
             buf.first = NULL;
         } else {
@@ -404,7 +496,7 @@ generate_log_config_ends(PyObject *file_or_serial, PyObject *type_names) {
     IdVector empty;
     buf = encode_log_config(DIAG_END_6000, empty);
     if (buf.first != NULL && buf.second != 0) {
-        (void) send_msg(file_or_serial, buf.first, buf.second);
+        (void) send_msg_to_pyobj(file_or_serial, buf.first, buf.second);
         delete[] buf.first;
         buf.first = NULL;
     } else {
@@ -443,42 +535,79 @@ dm_collector_c_set_sampling_rate(PyObject *self, PyObject *args) {
 }
 
 
+// Mirrors generate_log_config_msgs() but sends via g_serial_port (C++ fd)
+// instead of a Python file/serial object.
+// This is the live-monitoring path; generate_log_config_msgs() is kept for
+// generate_diag_cfg() which writes to a Python file object.
+static bool
+generate_log_config_msgs_serial(PyObject *type_names) {
+    IdVector type_ids;
+    bool success = map_typenames_to_ids(type_names, type_ids);
+    if (!success) {
+        PyErr_SetString(PyExc_ValueError, "Wrong type name.");
+        return false;
+    }
+
+    BinaryBuffer buf;
+    IdVector::iterator debug_ind = type_ids.begin();
+    for (; debug_ind != type_ids.end(); debug_ind++) {
+        if (*debug_ind == Modem_debug_message)
+            break;
+    }
+    if (debug_ind != type_ids.end()) {
+        type_ids.erase(debug_ind);
+        buf = encode_log_config(DEBUG_WCDMA_L1, type_ids);
+        if (buf.first != NULL && buf.second != 0) {
+            (void) send_msg(buf.first, buf.second);
+            delete[] buf.first;
+        } else {
+            PyErr_SetString(PyExc_RuntimeError, "Log config msg failed to encode.");
+            return false;
+        }
+    }
+
+    std::vector<IdVector> type_id_vectors;
+    sort_type_ids(type_ids, type_id_vectors);
+    for (size_t i = 0; i < type_id_vectors.size(); i++) {
+        const IdVector &v = type_id_vectors[i];
+        buf = encode_log_config(SET_MASK, v);
+        if (buf.first != NULL && buf.second != 0) {
+            (void) send_msg(buf.first, buf.second);
+            delete[] buf.first;
+        } else {
+            PyErr_SetString(PyExc_RuntimeError, "Log config msg failed to encode.");
+            return false;
+        }
+    }
+    return true;
+}
+
 // Return: successful or not
+// NOTE: serial port argument removed — g_serial_port is used directly.
+// Call dm_collector_c.open_serial() before this.
 static PyObject *
 dm_collector_c_enable_logs(PyObject *self, PyObject *args) {
     (void) self;
-    PyObject *serial_port = NULL;
     PyObject *sequence = NULL;
     bool success = false;
 
-    if (!PyArg_ParseTuple(args, "OO", &serial_port, &sequence)) {
+    if (!PyArg_ParseTuple(args, "O", &sequence)) {
         return NULL;
     }
-    Py_INCREF(serial_port);
     Py_INCREF(sequence);
 
-    // Check arguments
-    if (!check_serial_port(serial_port)) {
-        PyErr_SetString(PyExc_TypeError, "\'port\' is not a serial port.");
-        goto raise_exception;
-    }
     if (!PySequence_Check(sequence)) {
         PyErr_SetString(PyExc_TypeError, "\'type_names\' is not a sequence.");
-        goto raise_exception;
+        Py_DECREF(sequence);
+        return NULL;
     }
 
-    success = generate_log_config_msgs(serial_port, sequence);
+    success = generate_log_config_msgs_serial(sequence);
+    Py_DECREF(sequence);
     if (!success) {
-        goto raise_exception;
+        return NULL;
     }
-    Py_DECREF(sequence);
-    Py_DECREF(serial_port);
     Py_RETURN_TRUE;
-
-    raise_exception:
-    Py_DECREF(sequence);
-    Py_DECREF(serial_port);
-    return NULL;
 }
 
 // Return: successful or not
@@ -592,7 +721,7 @@ dm_collector_c_generate_diag_cfg(PyObject *self, PyObject *args) {
             buf = encode_log_config(DISABLE, empty);
         }
         if (buf.first != NULL && buf.second != 0) {
-            (void) send_msg(file, buf.first, buf.second);
+            (void) send_msg_to_pyobj(file, buf.first, buf.second);
             delete[] buf.first;
             buf.first = NULL;
         } else {
