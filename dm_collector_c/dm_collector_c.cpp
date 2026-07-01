@@ -361,66 +361,27 @@ dm_collector_c_run_loop(PyObject *self, PyObject *args) {
     char buf[64];
     int fd = g_serial_port.fd();
 
-    fprintf(stderr, "[RL] run_loop started: fd=%d skip_decoding=%d\n",
-            fd, skip_decoding);
-    fflush(stderr);
-
-    int dbg_selects = 0, dbg_reads = 0, dbg_frames = 0, dbg_callbacks = 0;
-
     while (true) {
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(fd, &rfds);
-        struct timeval tv = {0, 100000};  // 100ms timeout
-
-        int ready;
-        Py_BEGIN_ALLOW_THREADS
-        ready = select(fd + 1, &rfds, NULL, NULL, &tv);
-        Py_END_ALLOW_THREADS
-
-        if (PyErr_CheckSignals() != 0)
-            return NULL;
-
-        if (ready == 0) {
-            // Heartbeat every 10 timeouts (~1 second) so we know the loop
-            // is alive even when no serial data arrives.
-            dbg_selects++;
-            if (dbg_selects % 10 == 0) {
-                fprintf(stderr, "[RL] alive: selects=%d reads=%d frames=%d callbacks=%d\n",
-                        dbg_selects, dbg_reads, dbg_frames, dbg_callbacks);
-                fflush(stderr);
-            }
-            continue;
-        }
-        if (ready < 0) {
-            fprintf(stderr, "[RL] select() error: errno=%d\n", errno);
-            fflush(stderr);
-            if (errno == EINTR) continue;
-            break;
-        }
-
+        // Plain blocking read — matches the original Python serial.read(64)
+        // which also used timeout=None (no select internally).
+        // PyErr_CheckSignals() after each read handles Ctrl+C; it only fires
+        // when the read returns (after data arrives), so Ctrl+C response is
+        // slightly delayed but works without the extra select() syscall cost.
         ssize_t got;
         Py_BEGIN_ALLOW_THREADS
         got = ::read(fd, buf, sizeof(buf));
         Py_END_ALLOW_THREADS
 
+        if (PyErr_CheckSignals() != 0)
+            return NULL;
+
         if (got < 0) {
-            fprintf(stderr, "[RL] read() error: errno=%d\n", errno);
-            fflush(stderr);
             if (errno == EINTR) continue;
             break;
         }
         if (got == 0) {
-            fprintf(stderr, "[RL] read() returned 0 (EOF — device disconnected?)\n");
-            fflush(stderr);
             PyErr_SetString(PyExc_RuntimeError, "Serial port closed (EOF)");
             return NULL;
-        }
-
-        dbg_reads++;
-        if (dbg_reads <= 5 || dbg_reads % 200 == 0) {
-            fprintf(stderr, "[RL] read #%d: got=%zd bytes\n", dbg_reads, got);
-            fflush(stderr);
         }
 
         feed_binary(buf, got);
@@ -446,17 +407,11 @@ dm_collector_c_run_loop(PyObject *self, PyObject *args) {
                 break;
             }
 
-            dbg_callbacks++;
-            fprintf(stderr, "[RL] packet #%d — calling callback\n", dbg_callbacks);
-            fflush(stderr);
-
             PyObject *result = PyObject_CallObject(callback,
                                    PyTuple_Pack(1, packet));
             Py_DECREF(packet);
 
             if (result == NULL) {
-                fprintf(stderr, "[RL] callback #%d raised a Python exception\n", dbg_callbacks);
-                fflush(stderr);
                 Py_DECREF(recv_args);
                 return NULL;
             }
