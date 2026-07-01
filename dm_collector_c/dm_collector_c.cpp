@@ -361,12 +361,13 @@ dm_collector_c_run_loop(PyObject *self, PyObject *args) {
     char buf[64];
     int fd = g_serial_port.fd();
 
+    fprintf(stderr, "[RL] run_loop started: fd=%d skip_decoding=%d\n",
+            fd, skip_decoding);
+    fflush(stderr);
+
+    int dbg_selects = 0, dbg_reads = 0, dbg_frames = 0, dbg_callbacks = 0;
+
     while (true) {
-        // --- Bug fix: use select() with a timeout instead of blocking read ---
-        // Blocking ::read() with GIL released means Ctrl+C (SIGINT) queues in
-        // Python but ::read() never returns to let Python handle it.
-        // select() with a 100ms timeout wakes us up periodically so we can
-        // re-acquire the GIL and call PyErr_CheckSignals().
         fd_set rfds;
         FD_ZERO(&rfds);
         FD_SET(fd, &rfds);
@@ -377,16 +378,25 @@ dm_collector_c_run_loop(PyObject *self, PyObject *args) {
         ready = select(fd + 1, &rfds, NULL, NULL, &tv);
         Py_END_ALLOW_THREADS
 
-        // GIL re-acquired: check if Python has a pending signal (e.g. Ctrl+C).
-        // PyErr_CheckSignals() runs any pending signal handlers and returns -1
-        // if a KeyboardInterrupt (or other signal exception) was raised.
         if (PyErr_CheckSignals() != 0)
             return NULL;
 
-        if (ready == 0) continue;   // timeout, no data yet — loop to recheck
+        if (ready == 0) {
+            // Heartbeat every 10 timeouts (~1 second) so we know the loop
+            // is alive even when no serial data arrives.
+            dbg_selects++;
+            if (dbg_selects % 10 == 0) {
+                fprintf(stderr, "[RL] alive: selects=%d reads=%d frames=%d callbacks=%d\n",
+                        dbg_selects, dbg_reads, dbg_frames, dbg_callbacks);
+                fflush(stderr);
+            }
+            continue;
+        }
         if (ready < 0) {
+            fprintf(stderr, "[RL] select() error: errno=%d\n", errno);
+            fflush(stderr);
             if (errno == EINTR) continue;
-            break;  // real select() error
+            break;
         }
 
         ssize_t got;
@@ -395,12 +405,22 @@ dm_collector_c_run_loop(PyObject *self, PyObject *args) {
         Py_END_ALLOW_THREADS
 
         if (got < 0) {
+            fprintf(stderr, "[RL] read() error: errno=%d\n", errno);
+            fflush(stderr);
             if (errno == EINTR) continue;
             break;
         }
         if (got == 0) {
+            fprintf(stderr, "[RL] read() returned 0 (EOF — device disconnected?)\n");
+            fflush(stderr);
             PyErr_SetString(PyExc_RuntimeError, "Serial port closed (EOF)");
             return NULL;
+        }
+
+        dbg_reads++;
+        if (dbg_reads <= 5 || dbg_reads % 200 == 0) {
+            fprintf(stderr, "[RL] read #%d: got=%zd bytes\n", dbg_reads, got);
+            fflush(stderr);
         }
 
         feed_binary(buf, got);
@@ -409,25 +429,29 @@ dm_collector_c_run_loop(PyObject *self, PyObject *args) {
         std::string frame;
         bool crc_correct = false;
         while (get_next_frame(frame, crc_correct)) {
-            if (!crc_correct) continue;
+            dbg_frames++;
+            if (!crc_correct) {
+                fprintf(stderr, "[RL] frame #%d: CRC failed, dropping\n", dbg_frames);
+                fflush(stderr);
+                continue;
+            }
 
             PyObject *decoded = NULL;
             double ts = get_posix_timestamp();
 
-            // --- Bug fix: mirror all packet types from receive_log_packet ---
-            // The original handled three types; only checking is_log_packet
-            // was silently dropping debug and custom packets.
+            const char *pkt_type = "unknown";
             if (is_custom_packet(frame.c_str(), frame.size())) {
+                pkt_type = "custom";
                 if (skip_decoding) continue;
                 decoded = decode_custom_packet(frame.c_str() + 2,
                                                frame.size() - 2);
             } else if (is_log_packet(frame.c_str(), frame.size())) {
+                pkt_type = "log";
                 decoded = decode_log_packet(frame.c_str() + 2,
                                             frame.size() - 2,
                                             skip_decoding);
             } else if (is_debug_packet(frame.c_str(), frame.size())) {
-                // Debug packets need a synthetic 14-byte header prepended
-                // before they can be decoded — same logic as receive_log_packet.
+                pkt_type = "debug";
                 unsigned short n_size = frame.size() + sizeof(char) * 14;
                 unsigned char tmp[14] = {
                     0xFF, 0xFF, 0x00, 0x00, 0xeb, 0x1f,
@@ -441,8 +465,15 @@ dm_collector_c_run_loop(PyObject *self, PyObject *args) {
                 decoded = decode_log_packet_modem(s, n_size, skip_decoding);
                 delete[] s;
             } else {
+                fprintf(stderr, "[RL] frame #%d: unrecognised type, skipping\n", dbg_frames);
+                fflush(stderr);
                 continue;
             }
+
+            fprintf(stderr, "[RL] frame #%d: type=%s decoded=%s\n",
+                    dbg_frames, pkt_type,
+                    (decoded == NULL ? "NULL" : (decoded == Py_None ? "None" : "OK")));
+            fflush(stderr);
 
             if (decoded == NULL || decoded == Py_None) {
                 Py_XDECREF(decoded);
@@ -457,11 +488,23 @@ dm_collector_c_run_loop(PyObject *self, PyObject *args) {
             PyObject *packet_tuple = Py_BuildValue("(Od)", decoded, ts);
             Py_DECREF(decoded);
 
+            dbg_callbacks++;
+            fprintf(stderr, "[RL] calling callback #%d\n", dbg_callbacks);
+            fflush(stderr);
+
             PyObject *result = PyObject_CallObject(callback,
                                    PyTuple_Pack(1, packet_tuple));
             Py_DECREF(packet_tuple);
-            if (result == NULL) return NULL;
+
+            if (result == NULL) {
+                fprintf(stderr, "[RL] callback #%d raised a Python exception\n", dbg_callbacks);
+                fflush(stderr);
+                return NULL;
+            }
             Py_DECREF(result);
+
+            fprintf(stderr, "[RL] callback #%d returned OK\n", dbg_callbacks);
+            fflush(stderr);
         }
     }
     Py_RETURN_NONE;
