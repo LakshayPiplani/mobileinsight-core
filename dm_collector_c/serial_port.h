@@ -32,6 +32,10 @@ public:
     // Returns true when a port is currently open.
     bool is_open() const;
 
+    // Returns the raw file descriptor. Needed by run_loop in dm_collector_c.cpp
+    // to pass to Py_BEGIN_ALLOW_THREADS / ::read() directly.
+    int fd() const { return fd_; }
+
     // Read up to `n` bytes into `buf`.
     // This is a blocking call: it will not return until at least 1 byte
     // arrives (or an error occurs).

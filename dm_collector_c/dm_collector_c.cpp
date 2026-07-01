@@ -67,6 +67,9 @@ static PyObject *dm_collector_c_receive_log_packet(PyObject *self, PyObject *arg
 
 static PyObject *dm_collector_c_set_sampling_rate(PyObject *self, PyObject *args);
 
+static PyObject *dm_collector_c_run_loop(PyObject *self, PyObject *args) ;
+
+
 static PyMethodDef DmCollectorCMethods[] = {
         {"open_serial",         dm_collector_c_open_serial,         METH_VARARGS,
                                                                        "Open a serial port.\n"
@@ -89,6 +92,16 @@ static PyMethodDef DmCollectorCMethods[] = {
                                                                        "\n"
                                                                        "Returns:\n"
                                                                        "    A bytes object containing the data read.\n"
+        },
+        {"run_loop",            dm_collector_c_run_loop,            METH_VARARGS,
+                                                                       "Read, decode, and dispatch packets in a C++ loop.\n"
+                                                                       "\n"
+                                                                       "Args:\n"
+                                                                       "    skip_decoding: bool, pass True to skip full decode.\n"
+                                                                       "    callback: callable(decoded_tuple) called per packet.\n"
+                                                                       "\n"
+                                                                       "Returns:\n"
+                                                                       "    None when the loop exits (serial error or KeyboardInterrupt).\n"
         },
         {"disable_logs",        dm_collector_c_disable_logs,        METH_VARARGS,
                                                                        "Disable logs for a serial port.\n"
@@ -330,6 +343,69 @@ dm_collector_c_disable_logs(PyObject *self, PyObject *args) {
     delete[] buf.first;
     Py_RETURN_TRUE;
 }
+
+static PyObject *
+dm_collector_c_run_loop(PyObject *self, PyObject *args) {
+    PyObject *callback = NULL;
+    PyObject *arg_skip_decoding = NULL;
+
+    if (!PyArg_ParseTuple(args, "OO", &arg_skip_decoding, &callback))
+        return NULL;
+    if (!PyCallable_Check(callback)) {
+        PyErr_SetString(PyExc_TypeError, "callback must be callable");
+        return NULL;
+    }
+
+    bool skip_decoding = (PyObject_IsTrue(arg_skip_decoding) == 1);
+    char buf[64];
+
+    while (true) {
+        ssize_t got;
+
+        Py_BEGIN_ALLOW_THREADS          // release GIL: safe to block
+        got = ::read(g_serial_port.fd(), buf, sizeof(buf));
+        Py_END_ALLOW_THREADS            // re-acquire GIL: back to Python land
+
+        if (got < 0) {
+            // EINTR means a signal (e.g. SIGWINCH) interrupted the read —
+            // not a real error, just retry.
+            if (errno == EINTR) continue;
+            // Any other negative return is a genuine I/O error: exit loop.
+            break;
+        }
+        if (got == 0) {
+            // EOF: the serial device was unplugged or closed.
+            PyErr_SetString(PyExc_RuntimeError, "Serial port closed (EOF)");
+            return NULL;
+        }
+
+        feed_binary(buf, got);          // pure C++
+
+        // decode loop: one read may produce zero or more frames
+        std::string frame;
+        bool crc_correct = false;
+        while (get_next_frame(frame, crc_correct)) {
+            if (!crc_correct) continue;
+            if (!is_log_packet(frame.c_str(), frame.size())) continue;
+
+            PyObject *decoded = decode_log_packet(
+                frame.c_str() + 2, frame.size() - 2, skip_decoding);
+            if (decoded == Py_None) { Py_DECREF(decoded); continue; }
+
+            double ts = get_posix_timestamp();
+            PyObject *packet_tuple = Py_BuildValue("(Od)", decoded, ts);
+            Py_DECREF(decoded);
+
+            PyObject *result = PyObject_CallObject(callback, 
+                                   PyTuple_Pack(1, packet_tuple));
+            Py_DECREF(packet_tuple);
+            if (result == NULL) return NULL;  // Python exception in callback
+            Py_DECREF(result);
+        }
+    }
+    Py_RETURN_NONE;
+}
+
 
 // Converts type names to a vector of IDs.
 // Returns true if all string are successfully converted, or false if wrong name
