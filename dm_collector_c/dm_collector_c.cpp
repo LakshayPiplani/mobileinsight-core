@@ -28,6 +28,7 @@
 #ifndef _WIN32
 
 #include <sys/time.h>
+#include <sys/select.h>
 
 #endif
 
@@ -358,48 +359,108 @@ dm_collector_c_run_loop(PyObject *self, PyObject *args) {
 
     bool skip_decoding = (PyObject_IsTrue(arg_skip_decoding) == 1);
     char buf[64];
+    int fd = g_serial_port.fd();
 
     while (true) {
-        ssize_t got;
+        // --- Bug fix: use select() with a timeout instead of blocking read ---
+        // Blocking ::read() with GIL released means Ctrl+C (SIGINT) queues in
+        // Python but ::read() never returns to let Python handle it.
+        // select() with a 100ms timeout wakes us up periodically so we can
+        // re-acquire the GIL and call PyErr_CheckSignals().
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(fd, &rfds);
+        struct timeval tv = {0, 100000};  // 100ms timeout
 
-        Py_BEGIN_ALLOW_THREADS          // release GIL: safe to block
-        got = ::read(g_serial_port.fd(), buf, sizeof(buf));
-        Py_END_ALLOW_THREADS            // re-acquire GIL: back to Python land
+        int ready;
+        Py_BEGIN_ALLOW_THREADS
+        ready = select(fd + 1, &rfds, NULL, NULL, &tv);
+        Py_END_ALLOW_THREADS
+
+        // GIL re-acquired: check if Python has a pending signal (e.g. Ctrl+C).
+        // PyErr_CheckSignals() runs any pending signal handlers and returns -1
+        // if a KeyboardInterrupt (or other signal exception) was raised.
+        if (PyErr_CheckSignals() != 0)
+            return NULL;
+
+        if (ready == 0) continue;   // timeout, no data yet — loop to recheck
+        if (ready < 0) {
+            if (errno == EINTR) continue;
+            break;  // real select() error
+        }
+
+        ssize_t got;
+        Py_BEGIN_ALLOW_THREADS
+        got = ::read(fd, buf, sizeof(buf));
+        Py_END_ALLOW_THREADS
 
         if (got < 0) {
-            // EINTR means a signal (e.g. SIGWINCH) interrupted the read —
-            // not a real error, just retry.
             if (errno == EINTR) continue;
-            // Any other negative return is a genuine I/O error: exit loop.
             break;
         }
         if (got == 0) {
-            // EOF: the serial device was unplugged or closed.
             PyErr_SetString(PyExc_RuntimeError, "Serial port closed (EOF)");
             return NULL;
         }
 
-        feed_binary(buf, got);          // pure C++
+        feed_binary(buf, got);
 
-        // decode loop: one read may produce zero or more frames
+        // One read may produce zero or more complete HDLC frames.
         std::string frame;
         bool crc_correct = false;
         while (get_next_frame(frame, crc_correct)) {
             if (!crc_correct) continue;
-            if (!is_log_packet(frame.c_str(), frame.size())) continue;
 
-            PyObject *decoded = decode_log_packet(
-                frame.c_str() + 2, frame.size() - 2, skip_decoding);
-            if (decoded == Py_None) { Py_DECREF(decoded); continue; }
-
+            PyObject *decoded = NULL;
             double ts = get_posix_timestamp();
+
+            // --- Bug fix: mirror all packet types from receive_log_packet ---
+            // The original handled three types; only checking is_log_packet
+            // was silently dropping debug and custom packets.
+            if (is_custom_packet(frame.c_str(), frame.size())) {
+                if (skip_decoding) continue;
+                decoded = decode_custom_packet(frame.c_str() + 2,
+                                               frame.size() - 2);
+            } else if (is_log_packet(frame.c_str(), frame.size())) {
+                decoded = decode_log_packet(frame.c_str() + 2,
+                                            frame.size() - 2,
+                                            skip_decoding);
+            } else if (is_debug_packet(frame.c_str(), frame.size())) {
+                // Debug packets need a synthetic 14-byte header prepended
+                // before they can be decoded — same logic as receive_log_packet.
+                unsigned short n_size = frame.size() + sizeof(char) * 14;
+                unsigned char tmp[14] = {
+                    0xFF, 0xFF, 0x00, 0x00, 0xeb, 0x1f,
+                    0x00, 0x00, 0x73, 0xB7, 0xB8, 0x65, 0xDD, 0x00
+                };
+                *(tmp + 2) = n_size;
+                *(tmp)     = n_size;
+                char *s = new char[n_size];
+                memmove(s, tmp, sizeof(char) * 14);
+                memmove(s + sizeof(char) * 14, frame.c_str(), frame.size());
+                decoded = decode_log_packet_modem(s, n_size, skip_decoding);
+                delete[] s;
+            } else {
+                continue;
+            }
+
+            if (decoded == NULL || decoded == Py_None) {
+                Py_XDECREF(decoded);
+                continue;
+            }
+
+            if (!manager_export_binary(&g_emanager, frame.c_str(), frame.size())) {
+                Py_DECREF(decoded);
+                continue;
+            }
+
             PyObject *packet_tuple = Py_BuildValue("(Od)", decoded, ts);
             Py_DECREF(decoded);
 
-            PyObject *result = PyObject_CallObject(callback, 
+            PyObject *result = PyObject_CallObject(callback,
                                    PyTuple_Pack(1, packet_tuple));
             Py_DECREF(packet_tuple);
-            if (result == NULL) return NULL;  // Python exception in callback
+            if (result == NULL) return NULL;
             Py_DECREF(result);
         }
     }
