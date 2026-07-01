@@ -127,6 +127,7 @@ ssize_t SerialPort::read(char* buf, size_t n) {
     //   -1   error (errno is set; callers should check)
     //
     // One line of code is enough here.
+    return (is_open() ? ::read(fd_, buf, n) : -1);
     // --------------------------------------------------------------------
 }
 
@@ -150,6 +151,7 @@ ssize_t SerialPort::write(const char* buf, size_t n) {
     //   -1    error
     //
     // One line of code is enough here.
+    return (is_open() ? ::write(fd_, buf, n) : -1);
     // --------------------------------------------------------------------
 }
 
@@ -162,7 +164,11 @@ speed_t SerialPort::to_baud_constant(int baud_rate) {
     // constants defined in <termios.h>.  This function translates between the
     // two worlds.
     switch (baud_rate) {
-        case 9600:   return B9600;
+        case 9600:   return B9600; break;
+        case 115200: return B115200; break;
+        case 460800: return B460800; break;
+        case 921600: return B921600; break;
+        case 4000000: return B4000000; break;
 
         // TODO ---------------------------------------------------------------
         // Add cases for the baud rates the Qualcomm modem actually uses.
