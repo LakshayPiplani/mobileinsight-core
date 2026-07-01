@@ -149,7 +149,7 @@ class DMCollector(Monitor):
             # time.perf_counter() measures wall-clock elapsed time.
             # We print a summary every PERF_INTERVAL packets so you can watch
             # throughput live and compare python-serial vs C++ serial builds.
-            PERF_INTERVAL = 25          # print every N decoded packets
+            PERF_INTERVAL = 10          # print every N decoded packets
             _perf_pkts    = 0            # decoded packet counter
             _perf_reads   = 0            # read_serial() call counter
             _perf_cpu0    = time.process_time()
@@ -158,7 +158,13 @@ class DMCollector(Monitor):
 
             while True:
                 s = dm_collector_c.read_serial(64)
-                _perf_reads += 1         # count every read, even empty ones
+                _perf_reads += 1
+
+                # Heartbeat: print every 200 reads regardless of decoded output
+                # so we know the loop is running even if no packets are decoded.
+                if _perf_reads % 200 == 0:
+                    print("[PERF] reads=%d pkts=%d (heartbeat)" % (
+                          _perf_reads, _perf_pkts), flush=True)
 
                 dm_collector_c.feed_binary(s)
 
@@ -187,11 +193,10 @@ class DMCollector(Monitor):
                                   _perf_pkts, _perf_reads,
                                   wall, cpu,
                                   _perf_pkts / wall,
-                                  cpu / _perf_pkts * 1000.0))
+                                  cpu / _perf_pkts * 1000.0), flush=True)
                         # ----------------------------------------------------
 
                     except FormatError as e:
-                        # skip this packet
                         print(("FormatError: ", e))
 
         except (KeyboardInterrupt, RuntimeError) as e:
