@@ -140,7 +140,7 @@ class DMCollector(Monitor):
             dm_collector_c.enable_logs(phy_ser, self._type_names)
 
             # --- performance counters ---
-            PERF_INTERVAL = 25
+            PERF_INTERVAL = 10
             _perf_pkts  = 0
             _perf_reads = 0
             _perf_cpu0  = time.process_time()
