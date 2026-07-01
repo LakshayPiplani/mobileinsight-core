@@ -17,6 +17,7 @@ import optparse
 import serial
 import sys
 import timeit
+import time
 
 from .dm_endec import *
 # import dm_collector_c
@@ -138,9 +139,18 @@ class DMCollector(Monitor):
             self.log_debug("Enable logs")
             dm_collector_c.enable_logs(phy_ser, self._type_names)
 
+            # --- performance counters ---
+            PERF_INTERVAL = 25
+            _perf_pkts  = 0
+            _perf_reads = 0
+            _perf_cpu0  = time.process_time()
+            _perf_wall0 = time.perf_counter()
+            # ----------------------------
+
             # Read log packets from serial port and decode their contents
             while True:
                 s = phy_ser.read(64)
+                _perf_reads += 1
                 # s = phy_ser.read(1)
                 dm_collector_c.feed_binary(s)
 
@@ -163,6 +173,18 @@ class DMCollector(Monitor):
                                       type_id,
                                       packet)
                         self.send(event)
+                        _perf_pkts += 1
+                        if _perf_pkts % PERF_INTERVAL == 0:
+                            cpu = time.process_time() - _perf_cpu0
+                            wall = time.perf_counter()  - _perf_wall0
+                            print("[PERF] pkts=%d reads=%d | "
+                                  "wall=%.3fs cpu=%.3fs | "
+                                  "%.1f pkt/s  cpu/pkt=%.3fms" % (
+                                  _perf_pkts, _perf_reads,
+                                  wall, cpu,
+                                  _perf_pkts / wall,
+                                  cpu / _perf_pkts * 1000.0), flush=True)
+
                     except FormatError as e:
                         # skip this packet
                         print(("FormatError: ", e))

@@ -130,15 +130,15 @@ bool
 get_next_frame (std::string& output_frame, bool& crc_correct) {
     size_t delim = buffer.find('\x7e');
     if (delim == std::string::npos) {
-        print_hex("MI(PARTIAL) no delimiter yet, pending buffer", buffer);
+        //print_hex("MI(PARTIAL) no delimiter yet, pending buffer", buffer);
         return false;
     }
     output_frame = buffer.substr(0, delim);
     buffer.erase(0, delim + 1);
 
     unescape(output_frame);
-    print_hex("MI(FRAME) delimiter found, extracted frame", output_frame);
-    print_hex("MI(LEFTOVER) buffer remaining after this frame was processed", buffer)
+    // print_hex("MI(FRAME) delimiter found, extracted frame", output_frame);
+    // print_hex("MI(LEFTOVER) buffer remaining after this frame was processed", buffer)
     if (output_frame.size() <= 2) {
         crc_correct = false;
         return true;
