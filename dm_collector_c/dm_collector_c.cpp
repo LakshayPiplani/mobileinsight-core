@@ -425,87 +425,45 @@ dm_collector_c_run_loop(PyObject *self, PyObject *args) {
 
         feed_binary(buf, got);
 
-        // One read may produce zero or more complete HDLC frames.
-        std::string frame;
-        bool crc_correct = false;
-        while (get_next_frame(frame, crc_correct)) {
-            dbg_frames++;
-            if (!crc_correct) {
-                fprintf(stderr, "[RL] frame #%d: CRC failed, dropping\n", dbg_frames);
-                fflush(stderr);
-                continue;
+        // Drain all packets from the buffer using the exact same
+        // receive_log_packet function — zero reimplementation, identical path.
+        // We build the args tuple once and reuse it each iteration.
+        PyObject *recv_args = PyTuple_Pack(2,
+                                skip_decoding ? Py_True : Py_False,
+                                Py_True);  // include_timestamp=True
+
+        while (true) {
+            PyObject *packet = dm_collector_c_receive_log_packet(NULL, recv_args);
+
+            if (packet == NULL) {
+                // Python exception inside receive_log_packet
+                Py_DECREF(recv_args);
+                return NULL;
             }
-
-            PyObject *decoded = NULL;
-            double ts = get_posix_timestamp();
-
-            const char *pkt_type = "unknown";
-            if (is_custom_packet(frame.c_str(), frame.size())) {
-                pkt_type = "custom";
-                if (skip_decoding) continue;
-                decoded = decode_custom_packet(frame.c_str() + 2,
-                                               frame.size() - 2);
-            } else if (is_log_packet(frame.c_str(), frame.size())) {
-                pkt_type = "log";
-                decoded = decode_log_packet(frame.c_str() + 2,
-                                            frame.size() - 2,
-                                            skip_decoding);
-            } else if (is_debug_packet(frame.c_str(), frame.size())) {
-                pkt_type = "debug";
-                unsigned short n_size = frame.size() + sizeof(char) * 14;
-                unsigned char tmp[14] = {
-                    0xFF, 0xFF, 0x00, 0x00, 0xeb, 0x1f,
-                    0x00, 0x00, 0x73, 0xB7, 0xB8, 0x65, 0xDD, 0x00
-                };
-                *(tmp + 2) = n_size;
-                *(tmp)     = n_size;
-                char *s = new char[n_size];
-                memmove(s, tmp, sizeof(char) * 14);
-                memmove(s + sizeof(char) * 14, frame.c_str(), frame.size());
-                decoded = decode_log_packet_modem(s, n_size, skip_decoding);
-                delete[] s;
-            } else {
-                fprintf(stderr, "[RL] frame #%d: unrecognised type, skipping\n", dbg_frames);
-                fflush(stderr);
-                continue;
+            if (packet == Py_None) {
+                // No more frames in the buffer
+                Py_DECREF(packet);
+                break;
             }
-
-            fprintf(stderr, "[RL] frame #%d: type=%s decoded=%s\n",
-                    dbg_frames, pkt_type,
-                    (decoded == NULL ? "NULL" : (decoded == Py_None ? "None" : "OK")));
-            fflush(stderr);
-
-            if (decoded == NULL || decoded == Py_None) {
-                Py_XDECREF(decoded);
-                continue;
-            }
-
-            if (!manager_export_binary(&g_emanager, frame.c_str(), frame.size())) {
-                Py_DECREF(decoded);
-                continue;
-            }
-
-            PyObject *packet_tuple = Py_BuildValue("(Od)", decoded, ts);
-            Py_DECREF(decoded);
 
             dbg_callbacks++;
-            fprintf(stderr, "[RL] calling callback #%d\n", dbg_callbacks);
+            fprintf(stderr, "[RL] packet #%d — calling callback\n", dbg_callbacks);
             fflush(stderr);
 
             PyObject *result = PyObject_CallObject(callback,
-                                   PyTuple_Pack(1, packet_tuple));
-            Py_DECREF(packet_tuple);
+                                   PyTuple_Pack(1, packet));
+            Py_DECREF(packet);
 
             if (result == NULL) {
                 fprintf(stderr, "[RL] callback #%d raised a Python exception\n", dbg_callbacks);
                 fflush(stderr);
+                Py_DECREF(recv_args);
                 return NULL;
             }
             Py_DECREF(result);
-
-            fprintf(stderr, "[RL] callback #%d returned OK\n", dbg_callbacks);
-            fflush(stderr);
         }
+
+        Py_DECREF(recv_args);
     }
     Py_RETURN_NONE;
 }
