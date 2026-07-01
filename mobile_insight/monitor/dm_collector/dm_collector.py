@@ -15,6 +15,7 @@ import binascii
 import os
 import optparse
 import sys
+import time
 import timeit
 
 from .dm_endec import *
@@ -141,8 +142,24 @@ class DMCollector(Monitor):
             # Read log packets from serial port and decode their contents.
             # dm_collector_c.read_serial(n) blocks until n bytes arrive and
             # returns a Python bytes object — same contract as serial.read(n).
+
+            # --- performance counters ---------------------------------------
+            # time.process_time() measures CPU time consumed by this process
+            # (excludes time the process is blocked on I/O or sleeping).
+            # time.perf_counter() measures wall-clock elapsed time.
+            # We print a summary every PERF_INTERVAL packets so you can watch
+            # throughput live and compare python-serial vs C++ serial builds.
+            PERF_INTERVAL = 25          # print every N decoded packets
+            _perf_pkts    = 0            # decoded packet counter
+            _perf_reads   = 0            # read_serial() call counter
+            _perf_cpu0    = time.process_time()
+            _perf_wall0   = time.perf_counter()
+            # ----------------------------------------------------------------
+
             while True:
                 s = dm_collector_c.read_serial(64)
+                _perf_reads += 1         # count every read, even empty ones
+
                 dm_collector_c.feed_binary(s)
 
                 decoded = dm_collector_c.receive_log_packet(self._skip_decoding,
@@ -150,20 +167,29 @@ class DMCollector(Monitor):
                                                             )
                 if decoded:
                     try:
-                        # packet = DMLogPacket(decoded)
                         if not decoded[0]:
                             continue
                         packet = DMLogPacket(decoded[0])
                         type_id = packet.get_type_id()
-                        # print d["type_id"], d["timestamp"]
-                        # xml = packet.decode_xml()
-                        # print xml
-                        # print ""
-                        # Send event to analyzers
                         event = Event(timeit.default_timer(),
                                       type_id,
                                       packet)
                         self.send(event)
+
+                        # --- emit perf snapshot every PERF_INTERVAL packets -
+                        _perf_pkts += 1
+                        if _perf_pkts % PERF_INTERVAL == 0:
+                            cpu  = time.process_time() - _perf_cpu0
+                            wall = time.perf_counter()  - _perf_wall0
+                            print("[PERF] pkts=%d reads=%d | "
+                                  "wall=%.3fs cpu=%.3fs | "
+                                  "%.1f pkt/s  cpu/pkt=%.3fms" % (
+                                  _perf_pkts, _perf_reads,
+                                  wall, cpu,
+                                  _perf_pkts / wall,
+                                  cpu / _perf_pkts * 1000.0))
+                        # ----------------------------------------------------
+
                     except FormatError as e:
                         # skip this packet
                         print(("FormatError: ", e))
