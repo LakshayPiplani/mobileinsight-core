@@ -399,36 +399,6 @@ dm_collector_c_run_loop(PyObject *self, PyObject *args) {
 }
 
 
-// Converts type names to a vector of IDs.
-// Returns true if all string are successfully converted, or false if wrong name
-// is found.
-static bool
-map_typenames_to_ids(PyObject *type_names, IdVector &type_ids) {
-    Py_ssize_t n = PySequence_Length(type_names);
-
-    bool name_error = false;
-    for (Py_ssize_t i = 0; i < n; i++) {
-        PyObject *item = PySequence_GetItem(type_names, i);
-        if (!PyUnicode_Check(item)) {
-            // ignore non-strings
-        } else {
-            const char *name = PyUnicode_AsUTF8(item);
-            int cnt = find_ids(LogPacketTypeID_To_Name,
-                               ARRAY_SIZE(LogPacketTypeID_To_Name, ValueName),
-                               name, type_ids);
-            if (cnt == 0) {
-                name_error = true;
-            }
-        }
-        if (item != NULL) {
-            Py_DECREF(item);    // Discard reference ownership
-        }
-        if (name_error) {
-            break;
-        }
-    }
-    return !name_error;
-}
 
 // A helper function that generated binary code to enable the specified types
 // of messages.
@@ -648,34 +618,6 @@ generate_log_config_msgs_serial(PyObject *type_names) {
         }
     }
     return true;
-}
-
-// Return: successful or not
-// NOTE: serial port argument removed — g_serial_port is used directly.
-// Call dm_collector_c.open_serial() before this.
-static PyObject *
-dm_collector_c_enable_logs(PyObject *self, PyObject *args) {
-    (void) self;
-    PyObject *sequence = NULL;
-    bool success = false;
-
-    if (!PyArg_ParseTuple(args, "O", &sequence)) {
-        return NULL;
-    }
-    Py_INCREF(sequence);
-
-    if (!PySequence_Check(sequence)) {
-        PyErr_SetString(PyExc_TypeError, "\'type_names\' is not a sequence.");
-        Py_DECREF(sequence);
-        return NULL;
-    }
-
-    success = generate_log_config_msgs_serial(sequence);
-    Py_DECREF(sequence);
-    if (!success) {
-        return NULL;
-    }
-    Py_RETURN_TRUE;
 }
 
 // Return: successful or not
