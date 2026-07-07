@@ -242,14 +242,7 @@ send_msg_to_pyobj(PyObject *pyobj, const char *b, int length) {
     return true;
 }
 
-// send_msg() is the new path: encodes as HDLC and writes straight to the
-// C++ serial port fd, no Python object involved.
-static bool
-send_msg(const char *b, int length) {
-    std::string frame = encode_hdlc_frame(b, length);
-    ssize_t written = g_serial_port.write(frame.c_str(), frame.size());
-    return written >= 0;
-}
+
 
 #ifndef _WIN32
 
@@ -325,24 +318,6 @@ dm_collector_c_read_serial(PyObject *self, PyObject *args) {
 
     // "y#" builds a Python bytes object from (const char*, Py_ssize_t)
     return PyBytes_FromStringAndSize(buf.data(), got);
-}
-
-// Return: successful or not
-// NOTE: serial port argument removed — g_serial_port is used directly.
-// Call dm_collector_c.open_serial() before this.
-static PyObject *
-dm_collector_c_disable_logs(PyObject *self, PyObject *args) {
-    (void) self;
-    (void) args;   // no arguments expected from Python anymore
-    IdVector empty;
-
-    BinaryBuffer buf = encode_log_config(DISABLE, empty);
-    if (buf.first == NULL || buf.second == 0) {
-        Py_RETURN_FALSE;
-    }
-    (void) send_msg(buf.first, buf.second);
-    delete[] buf.first;
-    Py_RETURN_TRUE;
 }
 
 static PyObject *
