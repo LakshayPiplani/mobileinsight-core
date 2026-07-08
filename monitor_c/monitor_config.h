@@ -16,5 +16,6 @@ struct MonitorConfig {
     bool        skip_decoding  = false;
     std::string log_output_path;
     double      sampling_rate  = 1.0;
+    bool        verbose        = false;  // opt-in debug tracing (setup, I/O, frame classification)
 };
 

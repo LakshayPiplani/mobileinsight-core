@@ -6,6 +6,7 @@
 */
 
 #include "monitor_base.h"
+#include "../bytes_proto/qualcomm/hdlc.h"
 #include <cerrno>
 #include <cstdio>
 
@@ -20,29 +21,52 @@ void MonitorBase::set_packet_handler(std::function<bool(const DecodedPacket&)> h
 }
 
 void MonitorBase::run() {
-    fprintf(stderr, "Trying to run monitor\n");
+    // Also controls the (very chatty — full-buffer-per-call) HDLC framing
+    // dump in bytes_proto/qualcomm/hdlc.cpp.
+    set_hdlc_verbose(config_.verbose);
 
-    if (!setup()) 
-    { fprintf(stderr, "Failed monitor setup\n"); 
-        return ;
-    };
+    if (config_.verbose) fprintf(stderr, "[monitor] starting setup()\n");
+    if (!setup()) {
+        fprintf(stderr, "[monitor] setup() failed - device not opened or "
+                        "DIAG config commands rejected; nothing will be read\n");
+        return;
+    }
     decoder_->configure(config_);
-    fprintf(stderr, "Configured decoder\n");
+    if (config_.verbose) fprintf(stderr, "[monitor] setup complete, decoder configured, entering read loop\n");
 
     char buf[64];
+    long total_read = 0, total_packets = 0;
     while (true) {
         ssize_t got;
         got = source_->read(buf, sizeof(buf));
-        fprintf(stderr, "Read %d bytes\n", got);
+        if (config_.verbose) {
+            fprintf(stderr, "[monitor] read() -> %zd bytes", got);
+            if (got > 0) {
+                fprintf(stderr, ":");
+                for (ssize_t i = 0; i < got; i++)
+                    fprintf(stderr, " %02x", (unsigned char) buf[i]);
+            }
+            fprintf(stderr, "\n");
+        }
         if (got < 0) { if (errno == EINTR) continue; break; }
         if (got == 0) { break; }
+        total_read += got;
 
         decoder_->feed(buf, got);
         DecodedPacket pkt;
         while (decoder_->receive_log_packet(pkt)) {
-            if (handler_ && !handler_(pkt)) return;
+            total_packets++;
+            if (handler_ && !handler_(pkt)) {
+                if (config_.verbose)
+                    fprintf(stderr, "[monitor] handler requested stop after %ld packet(s), %ld byte(s) read\n",
+                            total_packets, total_read);
+                return;
+            }
         }
     }
+    if (config_.verbose)
+        fprintf(stderr, "[monitor] read loop ended (EOF/error) after %ld packet(s), %ld byte(s) read\n",
+                total_packets, total_read);
 }
 
 

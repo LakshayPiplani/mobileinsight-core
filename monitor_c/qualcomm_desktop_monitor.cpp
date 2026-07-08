@@ -47,7 +47,7 @@ bool QualcommDesktopMonitor::enable_log(const std::vector<std::string>& type_nam
 }
 
 bool QualcommDesktopMonitor::enable_log_all() {
-    fprintf(stderr, "Tryng to enable all logs\n");
+    if (config_.verbose) fprintf(stderr, "[setup] enabling all public log types\n");
     return enable_log(available_log_types());
 }
 
@@ -58,10 +58,10 @@ bool QualcommDesktopMonitor::disable_log_all()
     if (buf.first == NULL || buf.second == 0)
         return false;
     bool ok = send_command(buf.first, buf.second);
-    if (ok) {
-        fprintf(stderr, "Sent disable command to buffer command %s\n", buf.first);
-    }
-    
+    if (config_.verbose)
+        fprintf(stderr, "[setup] disable_log_all: write %s (%d bytes on the wire)\n",
+                ok ? "OK" : "FAILED", buf.second);
+
     delete[] buf.first;
     return ok;
 }
@@ -97,9 +97,16 @@ bool QualcommDesktopMonitor::generate_log_config_msgs_serial(const std::vector<s
         const IdVector &v = type_id_vectors[i];
         buf = encode_log_config(SET_MASK, v);
         if (buf.first != NULL && buf.second != 0) {
-            fprintf(stderr, "Sending enable command for type_ids\n");
-            for (const int j: v) fprintf(stderr, "%d\n", j);
-            if (!send_command(buf.first, buf.second)) fprintf(stderr, "Failed to enable this log bucket\n");
+            bool ok = send_command(buf.first, buf.second);
+            if (config_.verbose) {
+                fprintf(stderr, "[setup] SET_MASK batch %zu/%zu: %s (%zu type_ids:",
+                        i + 1, type_id_vectors.size(), ok ? "OK" : "FAILED", v.size());
+                for (const int j : v) fprintf(stderr, " %d", j);
+                fprintf(stderr, ")\n");
+            } else if (!ok) {
+                fprintf(stderr, "[setup] SET_MASK batch %zu/%zu failed to send\n",
+                        i + 1, type_id_vectors.size());
+            }
             delete[] buf.first;
         } else {
             // PyErr_SetString(PyExc_RuntimeError, "Log config msg failed to encode.");

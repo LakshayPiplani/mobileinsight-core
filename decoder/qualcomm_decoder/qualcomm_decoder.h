@@ -5,6 +5,7 @@
 class QualcommDecoder : public Decoder {
     ExportManagerState emanager_;
     bool skip_decoding_ = false;
+    bool verbose_ = false;
 public:
     QualcommDecoder();
     ~QualcommDecoder() override;

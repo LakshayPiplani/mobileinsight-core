@@ -61,9 +61,16 @@ calc_crc (UINT8 *data, size_t len, UINT16 crc)
     return crc;
 }
 
+static bool g_hdlc_verbose = false;
+
+void set_hdlc_verbose (bool on) {
+    g_hdlc_verbose = on;
+}
+
 // Print the state of buffer at any point in time
 static void
 print_hex (const char* label, const std::string &data) {
+    if (!g_hdlc_verbose) return;
     fprintf(stderr, "%s (%zu bytes): ", label, data.size());
     for (size_t i = 0; i < data.size(); i++)
         fprintf(stderr, "%02x ", (unsigned char) data[i]);

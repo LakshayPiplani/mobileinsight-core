@@ -24,6 +24,7 @@ QualcommDecoder::~QualcommDecoder() {
 
 void QualcommDecoder::configure(const MonitorConfig& config) {
     skip_decoding_ = config.skip_decoding;
+    verbose_ = config.verbose;
 
     IdVector type_ids;
     for (const auto& name : config.type_names)
@@ -49,15 +50,21 @@ bool QualcommDecoder::receive_log_packet(DecodedPacket& out) {
 
     while (get_next_frame(frame, crc_correct)) {
         if (!crc_correct) {
-            fprintf(stderr, "MI(PACKET FAIL) dropped frame of %zu bytes: ", frame.size());
-            for (size_t i = 0; i < frame.size(); i++)
-                fprintf(stderr, "%02x ", (unsigned char) frame[i]);
+            fprintf(stderr, "MI(PACKET FAIL) dropped frame of %zu bytes (bad CRC)", frame.size());
+            if (verbose_) {
+                fprintf(stderr, ": ");
+                for (size_t i = 0; i < frame.size(); i++)
+                    fprintf(stderr, "%02x ", (unsigned char) frame[i]);
+            }
             fprintf(stderr, "\n");
             continue;
         }
         check_frame_format(frame);
 
         if (is_custom_packet(frame.c_str(), frame.size())) {
+            if (verbose_)
+                fprintf(stderr, "[decoder] frame: %zu bytes, lead=0x%02x -> CUSTOM_PACKET\n",
+                        frame.size(), frame.empty() ? 0 : (unsigned char) frame[0]);
             if (skip_decoding_)
                 continue;
             out.type = CUSTOM_PACKET;
@@ -79,8 +86,29 @@ bool QualcommDecoder::receive_log_packet(DecodedPacket& out) {
             type_id = Modem_debug_message;
         }
 
-        if (!manager_export_binary(&emanager_, type_id, frame.c_str(), frame.size()))
+        if (verbose_) {
+            unsigned char lead = frame.empty() ? 0 : (unsigned char) frame[0];
+            if (b_log) {
+                const char *name = search_name(LogPacketTypeID_To_Name,
+                                               LogPacketTypeID_To_Name_n, type_id);
+                fprintf(stderr, "[decoder] frame: %zu bytes, lead=0x%02x -> LOG type_id=0x%04x (%s)\n",
+                        frame.size(), lead, type_id, name ? name : "unknown type_id");
+            } else if (b_debug) {
+                fprintf(stderr, "[decoder] frame: %zu bytes, lead=0x%02x -> DEBUG_PACKET\n",
+                        frame.size(), lead);
+            } else {
+                fprintf(stderr, "[decoder] frame: %zu bytes, lead=0x%02x -> not LOG/DEBUG/CUSTOM "
+                                "(non-log DIAG traffic, e.g. command ack/status; dropped)\n",
+                        frame.size(), lead);
+            }
+        }
+
+        if (!manager_export_binary(&emanager_, type_id, frame.c_str(), frame.size())) {
+            if (verbose_ && (b_log || b_debug))
+                fprintf(stderr, "[decoder]   -> dropped: type_id 0x%04x not in the enabled/exported whitelist\n",
+                        type_id);
             continue;   // not in the enabled-type whitelist
+        }
 
         if (b_log) {
             out.type = LOG_PACKET;

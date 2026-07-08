@@ -11,6 +11,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 #include <unistd.h>   // access()
 
 // Protocol name carried by a raw_msg type_hint ("raw_msg/PROTO" -> "PROTO"),
@@ -78,22 +79,26 @@ static const char *packet_type_name(PacketType t) {
 
 int main(int argc, char **argv) {
 
-    const std::string ser_port =
-    argc > 1 ? argv[1]
-                : "/dev/ttyUSB0";
-    const int baud_rate = argc > 2 ? atoi(argv[2]) : 9600;
+    // Pull out -v/--verbose wherever it appears, then treat the rest of argv
+    // as positional (port, baud, ws_dissector, ws_lib, out_path).
+    bool verbose = false;
+    std::vector<std::string> pos;
+    for (int i = 1; i < argc; i++) {
+        std::string a = argv[i];
+        if (a == "-v" || a == "--verbose") verbose = true;
+        else pos.push_back(a);
+    }
+
+    const std::string ser_port  = pos.size() > 0 ? pos[0] : "/dev/ttyUSB0";
+    const int baud_rate         = pos.size() > 1 ? atoi(pos[1].c_str()) : 9600;
 
     // ---- optional ws_dissector for raw_msg (RRC/NAS) PDU expansion ----
-    // Path from argv[3] or $WS_DISSECTOR; libwireshark dir from argv[4] or
-    // $WS_DISSECTOR_LIB. If unset or the process won't start, raw_msg fields
-    // are dumped as hex only (previous behavior).
-    std::string ws_path = argc > 3 ? argv[3] : (getenv("WS_DISSECTOR") ? getenv("WS_DISSECTOR") : "");
-    std::string ws_lib  = argc > 4 ? argv[4] : (getenv("WS_DISSECTOR_LIB") ? getenv("WS_DISSECTOR_LIB") : "");
-    std::string out_path = argc > 5 ? argv[5] : "serial_decoded.txt";
-    // create a serial object
-    // create a monitorconfig object
-    // create a decoder object
-    // create a monitor object
+    // Path from positional arg 3 or $WS_DISSECTOR; libwireshark dir from
+    // positional arg 4 or $WS_DISSECTOR_LIB. If unset or the process won't
+    // start, raw_msg fields are dumped as hex only.
+    std::string ws_path  = pos.size() > 2 ? pos[2] : (getenv("WS_DISSECTOR") ? getenv("WS_DISSECTOR") : "");
+    std::string ws_lib   = pos.size() > 3 ? pos[3] : (getenv("WS_DISSECTOR_LIB") ? getenv("WS_DISSECTOR_LIB") : "");
+    std::string out_path = pos.size() > 4 ? pos[4] : "serial_decoded.txt";
 
     WsDissector ws;
     WsDissector *wsp = nullptr;
@@ -132,7 +137,13 @@ int main(int argc, char **argv) {
     MonitorConfig cfg;
     cfg.port_path = ser_port;
     cfg.baud_rate = baud_rate;
-    cfg.log_output_path = out_path;
+    cfg.verbose = verbose;
+    // NOTE: do NOT point log_output_path at out_path. out_path is written by
+    // our own std::ofstream (text dump) below; log_output_path is opened
+    // separately by the decoder's export_manager (raw binary .mi2log,
+    // fopen(path, "wb")). Pointing both at the same file gives two
+    // independent writers truncating/appending the same path -> corruption.
+    // Leave it unset (no .mi2log export) unless you pass a distinct path.
     for (int i = 0; i < LogPacketTypeID_To_Name_n; ++i)
         cfg.type_names.push_back(LogPacketTypeID_To_Name[i].name);
 
@@ -167,8 +178,20 @@ int main(int argc, char **argv) {
     monitor.set_packet_handler(handler);
     monitor.run();   // setup() -> configure() -> read/feed/decode until EOF
 
-    printf("decoded %d packet(s) from %s -> %s\n",
+    printf("\ndecoded %d packet(s) from %s -> %s\n",
            n_packets, cfg.port_path.c_str(), out_path.c_str());
+    if (n_packets == 0) {
+        fprintf(stderr,
+            "[serialtest] zero packets decoded. Common causes:\n"
+            "  - modem is idle: LOG_F frames only appear during RRC/NAS/PHY\n"
+            "    activity (e.g. attach, paging, a call/data session) - DIAG\n"
+            "    config ACKs and other non-log chatter don't count\n"
+            "  - capture ended (Ctrl-C) before any activity happened - try\n"
+            "    triggering network activity or waiting longer\n"
+            "  - setup() failed silently, or the port/phone isn't in DIAG mode\n"
+            "Re-run with -v to see per-frame classification (LOG/DEBUG/CUSTOM/\n"
+            "dropped) and confirm whether frames are arriving at all.\n");
+    }
     return 0;
 }
 
