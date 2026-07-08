@@ -1,0 +1,21 @@
+CXX      := g++
+CXXFLAGS := -std=c++17 -Wall -Wextra -fPIC \
+            $(shell python3-config --includes) \
+            -I..
+
+SRCS := monitor_base.cpp qualcomm_desktop_monitor.cpp
+OBJS := $(SRCS:.cpp=.o)
+
+all: $(OBJS)
+
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+monitor_base.o:             monitor_base.cpp monitor_base.h \
+                            monitor_config.h ../decoder/qualcomm_decoder/qualcomm_decoder.h
+qualcomm_desktop_monitor.o: qualcomm_desktop_monitor.cpp qualcomm_desktop_monitor.h \
+                            monitor_base.h ../bytes_channel/serial_port.h \
+                            ../bytes_proto/qualcomm/hdlc.h ../bytes_proto/qualcomm/log_config.h
+
+clean:
+	rm -f $(OBJS)
