@@ -140,15 +140,24 @@ class DMCollector(Monitor):
             dm_collector_c.enable_logs(phy_ser, self._type_names)
 
             # --- performance counters ---
+            # The measured window is a pure sandwich around
+            #   serial read -> feed_binary -> receive_log_packet -> DMLogPacket
+            # accumulated per iteration; Event dispatch / analyzers / printing
+            # are outside the window. cpu = accumulated process CPU inside the
+            # window; wall (for pkt/s) = overall elapsed since loop start.
             PERF_INTERVAL = 10
             _perf_pkts  = 0
             _perf_reads = 0
-            _perf_cpu0  = time.process_time()
+            _perf_cpu_acc  = 0.0
+            _perf_wall_acc = 0.0
             _perf_wall0 = time.perf_counter()
             # ----------------------------
 
             # Read log packets from serial port and decode their contents
             while True:
+                _t_cpu0  = time.process_time()   # sandwich: open
+                _t_wall0 = time.perf_counter()
+
                 s = phy_ser.read(64)
                 _perf_reads += 1
                 # s = phy_ser.read(1)
@@ -157,37 +166,42 @@ class DMCollector(Monitor):
                 decoded = dm_collector_c.receive_log_packet(self._skip_decoding,
                                                             True,   # include_timestamp
                                                             )
-                if decoded:
-                    try:
-                        # packet = DMLogPacket(decoded)
-                        if not decoded[0]:
-                            continue
+                packet = None
+                try:
+                    if decoded and decoded[0]:
                         packet = DMLogPacket(decoded[0])
-                        type_id = packet.get_type_id()
-                        # print d["type_id"], d["timestamp"]
-                        # xml = packet.decode_xml()
-                        # print xml
-                        # print ""
-                        # Send event to analyzers
-                        _perf_pkts += 1
-                        if _perf_pkts % PERF_INTERVAL == 0:
-                            cpu = time.process_time() - _perf_cpu0
-                            wall = time.perf_counter()  - _perf_wall0
-                            print("[PERF] pkts=%d reads=%d | "
-                                  "wall=%.3fs cpu=%.3fs | "
-                                  "%.1f pkt/s  cpu/pkt=%.3fms" % (
-                                  _perf_pkts, _perf_reads,
-                                  wall, cpu,
-                                  _perf_pkts / wall,
-                                  cpu / _perf_pkts * 1000.0), flush=True)
-                        event = Event(timeit.default_timer(),
-                                      type_id,
-                                      packet)
-                        self.send(event)
+                except FormatError as e:
+                    # skip this packet
+                    print(("FormatError: ", e))
+                    packet = None
 
-                    except FormatError as e:
-                        # skip this packet
-                        print(("FormatError: ", e))
+                _perf_cpu_acc  += time.process_time() - _t_cpu0   # sandwich: close
+                _perf_wall_acc += time.perf_counter() - _t_wall0
+
+                if packet is None:
+                    continue
+
+                try:
+                    type_id = packet.get_type_id()
+                    # Send event to analyzers
+                    _perf_pkts += 1
+                    if _perf_pkts % PERF_INTERVAL == 0:
+                        wall = time.perf_counter() - _perf_wall0
+                        print("[PERF] pkts=%d reads=%d | "
+                              "wall=%.3fs cpu=%.3fs | "
+                              "%.1f pkt/s  cpu/pkt=%.3fms" % (
+                              _perf_pkts, _perf_reads,
+                              wall, _perf_cpu_acc,
+                              _perf_pkts / wall,
+                              _perf_cpu_acc / _perf_pkts * 1000.0), flush=True)
+                    event = Event(timeit.default_timer(),
+                                  type_id,
+                                  packet)
+                    self.send(event)
+
+                except FormatError as e:
+                    # skip this packet
+                    print(("FormatError: ", e))
 
         except (KeyboardInterrupt, RuntimeError) as e:
             print(("\n\n%s Detected: Disabling all logs" % type(e).__name__))
