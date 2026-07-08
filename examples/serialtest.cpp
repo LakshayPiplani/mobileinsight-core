@@ -144,8 +144,18 @@ int main(int argc, char **argv) {
     // fopen(path, "wb")). Pointing both at the same file gives two
     // independent writers truncating/appending the same path -> corruption.
     // Leave it unset (no .mi2log export) unless you pass a distinct path.
-    for (int i = 0; i < LogPacketTypeID_To_Name_n; ++i)
-        cfg.type_names.push_back(LogPacketTypeID_To_Name[i].name);
+    //
+    // Type whitelist: the five NR types from the validated Python capture
+    // (ea0_option branch, lp_v2_EA0_Jul8.mi2log). All are equip-id 0xB, so
+    // setup() sends exactly one SET_MASK — mirroring the known-working run.
+    // Widen this list once single-batch operation is confirmed on hardware.
+    cfg.type_names = {
+        "5G_NR_RRC_OTA_Packet",
+        "5G_NR_NAS_SM_Plain_OTA_Incoming_Msg",
+        "5G_NR_NAS_SM_Plain_OTA_Outgoing_Msg",
+        "5G_NR_NAS_MM_Plain_OTA_Incoming_Msg",
+        "5G_NR_NAS_MM_Plain_OTA_Outgoing_Msg",
+    };
 
     // ---- output + handler ----
     std::ofstream out(out_path);

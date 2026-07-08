@@ -27,9 +27,19 @@ protected:
 
 private:
     bool send_command(const char* b, int length);
+    // Wait (up to timeout_ms) for the modem's response frame to the command
+    // just sent. DIAG is command-response: firing the next command before the
+    // previous reply finishes gets it dropped by the modem (observed: 5
+    // back-to-back SET_MASKs -> only the first one acked, no logs enabled
+    // for the other equip IDs). Drained bytes are fed to the decoder so
+    // nothing is lost. No-op for mock sources without a real fd.
+    bool await_response(int timeout_ms);
+
     bool enable_log(const std::vector<std::string>& type_names);
     bool enable_log_all();
     bool disable_log_all();
     bool generate_log_config_msgs_serial(const std::vector<std::string>& type_names);
+
+    SerialPort* serial_ = nullptr;  // borrowed view of source_; owned by MonitorBase
 };
 

@@ -7,12 +7,20 @@
 
 #include "qualcomm_desktop_monitor.h"
 
+#include <cerrno>
+#include <cstdio>
+#include <sys/select.h>
+#include <sys/time.h>
+
 QualcommDesktopMonitor::QualcommDesktopMonitor(
     std::unique_ptr<SerialPort> port,
     std::unique_ptr<QualcommDecoder> decoder,
     const MonitorConfig &config)
     : MonitorBase(std::move(port), std::move(decoder), config)
 {
+    // The ctor signature guarantees source_ is a SerialPort (or subclass),
+    // so keep a typed view for get_fd() in await_response().
+    serial_ = static_cast<SerialPort*>(source_.get());
 }
 
 std::vector<std::string> QualcommDesktopMonitor::available_log_types() const {
@@ -38,7 +46,57 @@ bool QualcommDesktopMonitor::setup()
 
 bool QualcommDesktopMonitor::send_command(const char *b, int length) {
     std::string frame = encode_hdlc_frame(b, length);
-    return source_->write(frame.c_str(), frame.size());
+    if (!source_->write(frame.c_str(), frame.size()))
+        return false;
+    // DIAG is command-response: wait for this command's reply frame before
+    // the caller issues the next command (see await_response comment in .h).
+    return await_response(1000);
+}
+
+bool QualcommDesktopMonitor::await_response(int timeout_ms) {
+    int fd = serial_ ? serial_->get_fd() : -1;
+    if (fd < 0)
+        return true;   // mock/file source: no modem to wait for
+
+    char buf[256];
+    while (true) {
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(fd, &rfds);
+        struct timeval tv;
+        tv.tv_sec  = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+        int r = select(fd + 1, &rfds, NULL, NULL, &tv);
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            perror("[setup] await_response select");
+            return false;
+        }
+        if (r == 0) {
+            // No reply within the window. Don't fail setup — some commands
+            // may legitimately go unanswered — but make it visible.
+            fprintf(stderr, "[setup] WARNING: no response frame within %d ms "
+                            "after command\n", timeout_ms);
+            return true;
+        }
+
+        ssize_t got = source_->read(buf, sizeof(buf));
+        if (got <= 0)
+            return false;
+        // Nothing is thrown away: the decoder buffers these bytes and the
+        // run() loop later classifies the response frames (and drops them
+        // as non-log DIAG traffic).
+        decoder_->feed(buf, (int) got);
+
+        for (ssize_t i = 0; i < got; i++) {
+            if (buf[i] == '\x7e') {   // end of the response frame
+                if (config_.verbose)
+                    fprintf(stderr, "[setup]   response frame received\n");
+                return true;
+            }
+        }
+    }
 }
 
 bool QualcommDesktopMonitor::enable_log(const std::vector<std::string>& type_names) {
