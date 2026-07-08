@@ -1,5 +1,5 @@
 CXX      := g++
-CXXFLAGS := -std=c++17 -Wall -I..
+CXXFLAGS := -std=c++17 -Wall -g -I..
 
 LIBS := ../decoder/qualcomm_decoder/libqualcomm_decoder.a \
         ../export_manager/libexport_manager.a \
@@ -19,7 +19,7 @@ DEPDIRS := ../bytes_proto/qualcomm \
            ../decoder/qualcomm_decoder \
            ../monitor_c
 
-all: replay_mi2log
+all: replay_mi2log serialtest
 
 .PHONY: deps
 deps:
@@ -28,8 +28,11 @@ deps:
 replay_mi2log: replay_mi2log.cpp deps
 	$(CXX) $(CXXFLAGS) replay_mi2log.cpp $(MONITOR_OBJS) $(LIBS) -o $@
 
+serialtest: serialtest.cpp deps
+	$(CXX) $(CXXFLAGS) serialtest.cpp $(MONITOR_OBJS) $(LIBS) -o $@
+
 clean:
-	rm -f replay_mi2log decoded_packets.txt
+	rm -f replay_mi2log serialtest decoded_packets.txt
 
 # Also clean the prerequisite libraries.
 clean-all: clean
