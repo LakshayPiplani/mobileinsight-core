@@ -49,8 +49,8 @@ Refactor landed 2026-07-08 (pre-Phase-C cleanup, all builds verified):
 | A3 | Rewrite `log_packet_helper.h` helpers to `FieldList` | ✅ done — all helpers ported; `log_packet.h` top-level decls also switched to `FieldList` (needed for the header to parse); smoke test decodes `LogPacketHeaderFmt`, maps `type_id`→name, formats QCDM timestamp correctly |
 | B | Port NR5G decode code (15 types, incl. per-type `nr_*.h` headers) | ✅ done — all 13 `nr_*.h` headers converted (script + spot fixes) and **compile clean as one TU** (`-std=c++17 -Wall`, no Python includes). `_decode_nr_rrc_ota` + `_nr_rrc_reconf_complete_to_ul_dcch` (now returns `std::vector<uint8_t>`, §6) hand-converted inside `log_packet.cpp`; that file only compiles as a whole, so its verification lands with Phase C. Conversion script: scratchpad `convert_pyobject.py` (paren-aware §5 substitution map). |
 | C | Port LTE/WCDMA/GSM/CDMA/GNSS decode code (`log_packet.cpp` + remaining headers) | ✅ done 2026-07-08 — all 45 remaining per-type headers converted (script + `fix_carrier_temps.py` for temps orphaned by dead-decl removal) and compile as one TU; `log_packet.cpp` fully converted **including the top-level decode fns** (pulled forward from Phase D): `decode_log_packet` / `decode_custom_packet` / `decode_log_packet_modem` return `FieldList`, sampling gate returns empty list, `_decode_by_fmt_modem` uses `_qcdm_timestamp_to_iso`, `PyList_GetSlice(1,4)` → element move-slice. Compiles clean (`-std=c++17 -Wall`, zero errors; only pre-existing warnings: 2 multi-line comments + 4 `-Wparentheses` precedence bugs at `& 0x30 + x` sites, left as-is deliberately). End-to-end smoke test passed: `decode_log_packet` on synthetic WCDMA_RRC_States (flat + ValueName map) and LTE CMLIFMR v3 (nested list/dict, RSRP/RSRQ doubles). `parser_template.h` (unused reference file) not converted. |
-| D | Implement `receive_log_packet`/`reset`; delete `get_next_packet`; drop `Python.h` from `qualcomm_decoder.h`; fix includes; decoder Makefile | ☐ pending — top-level decode fns already done in C |
-| V | Full build verification (proto + decoder + monitor_c) | ☐ pending |
+| D | Implement `receive_log_packet`/`reset`; delete `get_next_packet`; drop `Python.h` from `qualcomm_decoder.h`; fix includes; decoder Makefile | ✅ done 2026-07-08 — `qualcomm_decoder.{h,cpp}` rewritten: `receive_log_packet` (frame loop: crc check → `check_frame_format` → classify once → export gate → decode → populate `DecodedPacket`), `reset` → `reset_binary()`, ctor name fixed (was `DMCollector`), `~QualcommDecoder` closes export file via new `manager_close()`, `get_posix_timestamp` local static, debug-msg path uses `std::vector<char>` (fixes `new char[]` leak in old code). Makefile → `libqualcomm_decoder.a` (dm_collector_c.cpp excluded — legacy, dies at Step 6). monitor_c Makefile no longer needs python3 includes. |
+| V | Full build verification (proto + decoder + monitor_c) | ✅ done 2026-07-08 — clean rebuild of all 5 components, zero errors. Link check binds monitor .o + all 4 libs, runs (`available_log_types` = 76). E2E smoke: configure(whitelist+export) → feed(HDLC wire) → receive_log_packet decodes WCDMA_RRC_States; whitelist drop, buffer-empty return, mid-frame reset, and `.mi2log` export file (2 frames, byte-exact) all verified. |
 
 ---
 
@@ -389,6 +389,16 @@ export_manager/
   The dissector port will consume `FieldEntry.type_hint = "raw_msg/PROTO"` and
   replace the bytes entry with a decoded sub-tree. Architecture is already
   compatible — no changes to `FieldList` needed when that happens.
+  - **Client done 2026-07-08:** `ws_dissector_client/` (`libws_dissector_client.a`)
+    is the C++ replacement for Python `WSDissector` — spawns the `ws_dissector`
+    subprocess, AWW-frames requests (`[type u32 BE][len u32 BE][payload]`), reads
+    PDML back to the `===___===` sentinel; `aww_type()` maps `raw_msg/<name>` →
+    AWW number. `examples/replay_mi2log.cpp` calls it to expand each `raw_msg`
+    field (additive; hex-only when no dissector configured). Built + tested
+    against a mock (scratchpad); the real libwireshark `ws_dissector/` binary is
+    not built on the dev box (runs on the Vagrant VM). What remains for full
+    "port": parse the returned PDML XML and splice it back into `FieldList` as a
+    sub-tree, replacing the raw bytes entry in-decoder.
 - **Python facade (Step 6 in parent plan):** a thin layer that walks
   `DecodedPacket.fields` and produces a Python dict. Much simpler than the
   current approach since the tree is already fully decoded.

@@ -1,17 +1,15 @@
 #pragma once
-#include <Python.h>
 #include "../../export_manager/export_manager.h"
 #include "../decoder.h"
 
 class QualcommDecoder : public Decoder {
     ExportManagerState emanager_;
+    bool skip_decoding_ = false;
 public:
     QualcommDecoder();
+    ~QualcommDecoder() override;
     void configure(const MonitorConfig& config) override;
     void feed(const char* buf, int n) override;
-    bool receive_log_packet(DecodedPacket& out) override;  // TODO: replace get_next_packet
+    bool receive_log_packet(DecodedPacket& out) override;
     void reset() override;
-
-    // kept until receive_log_packet is fully implemented
-    PyObject* get_next_packet(bool skip_decoding, bool include_timestamp);
 };

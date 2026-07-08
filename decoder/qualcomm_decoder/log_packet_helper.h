@@ -309,20 +309,42 @@ _decode_by_fmt(const Fmt fmt[], int n_fmt,
                 unsigned int ii = 0;
                 unsigned long long iiii = -1LL;
                 switch (fmt[i].len) {
+                    case 0:
+                        // Placeholder field (e.g. "Subframe Number", "FTL SNR"):
+                        // consumes no bytes; overwritten later via _replace_result.
+                        ii = 0;
+                        break;
                     case 1:
                         ii = *((unsigned char *) p);
                         break;
                     case 2:
                         ii = *((unsigned short *) p);
                         break;
+                    case 3:
+                        // 24-bit little-endian (e.g. NrRrcOtaPacketFmt "Unknown")
+                        ii = (unsigned int) (unsigned char) p[0]
+                           | ((unsigned int) (unsigned char) p[1] << 8)
+                           | ((unsigned int) (unsigned char) p[2] << 16);
+                        break;
                     case 4:
                         ii = *((unsigned int *) p);
+                        break;
+                    case 6:
+                        // 48-bit little-endian (e.g. "Maching ID")
+                        iiii = 0;
+                        memcpy(&iiii, p, 6);
                         break;
                     case 8:
                         memcpy(&iiii, p, sizeof(unsigned long long));
                         break;
                     default:
-                        assert(false);
+                        if (fmt[i].len > 8) {
+                            // Wider than 64 bits (e.g. 16-byte ciphering keys):
+                            // keep the low 64 bits; all bytes are still consumed.
+                            memcpy(&iiii, p, sizeof(unsigned long long));
+                        } else {
+                            assert(false);
+                        }
                         break;
                 }
                 if (fmt[i].len <= 4) {
@@ -348,6 +370,12 @@ _decode_by_fmt(const Fmt fmt[], int n_fmt,
                         break;
                     case 2:
                         ii = *((unsigned short *) p_reverse);
+                        break;
+                    case 3:
+                        // 24-bit big-endian (bytes already reversed above)
+                        ii = (unsigned int) (unsigned char) p_reverse[0]
+                           | ((unsigned int) (unsigned char) p_reverse[1] << 8)
+                           | ((unsigned int) (unsigned char) p_reverse[2] << 16);
                         break;
                     case 4:
                         ii = *((unsigned int *) p_reverse);

@@ -27,6 +27,10 @@ struct ExportManagerState {
 // Must be called before usage
 void manager_init_state (struct ExportManagerState *pstate);
 
+// Flush and close the output file (no-op if none is open). Call when the
+// owning decoder shuts down; the OS does not flush stdio buffers for us.
+void manager_close (struct ExportManagerState *pstate);
+
 // new_path == NULL closes/disables the output file; whitelist is the set of
 // type IDs to export (from MonitorConfig::type_names, mapped to IDs).
 void manager_change_config (struct ExportManagerState *pstate,

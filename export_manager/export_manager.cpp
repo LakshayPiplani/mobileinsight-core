@@ -35,12 +35,19 @@ manager_export_binary (struct ExportManagerState *pstate, int type_id,
 }
 
 void
-manager_change_config (struct ExportManagerState *pstate,
-                        const char *new_path, const IdVector &whitelist) {
-    if (pstate->log_fp != NULL && new_path != NULL && pstate->filename != new_path) {   // close old file
+manager_close (struct ExportManagerState *pstate) {
+    if (pstate->log_fp != NULL) {
         fclose(pstate->log_fp);
         pstate->log_fp = NULL;
         pstate->filename = "";
+    }
+}
+
+void
+manager_change_config (struct ExportManagerState *pstate,
+                        const char *new_path, const IdVector &whitelist) {
+    if (pstate->log_fp != NULL && new_path != NULL && pstate->filename != new_path) {   // close old file
+        manager_close(pstate);
     }
     if (pstate->log_fp == NULL && new_path != NULL) {   // open new file if necessary
         pstate->log_fp = fopen(new_path, "wb");

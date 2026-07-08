@@ -1,7 +1,6 @@
 CXX      := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -fPIC \
-            $(shell python3-config --includes) \
-            -I..
+# No Python includes needed: the decoder layer is fully PyObject-free.
+CXXFLAGS := -std=c++17 -Wall -Wextra -fPIC -I..
 
 SRCS := monitor_base.cpp qualcomm_desktop_monitor.cpp
 OBJS := $(SRCS:.cpp=.o)

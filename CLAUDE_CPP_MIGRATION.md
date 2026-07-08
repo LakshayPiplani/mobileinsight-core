@@ -34,7 +34,7 @@ machines, `Profile`, XML/ASN.1 via `ws_dissector`) stays in Python for now.
 | Protocol data | `bytes_proto/qualcomm/utils.{h,cpp}` | `find_ids()`, `IdVector`, `ValueName` |
 | Preferences | `monitor_c/monitor_config.h` | `MonitorConfig` plain struct |
 | Decoder ABC + packet type | `decoder/decoder.h` | `Decoder` ABC + `DecodedPacket` + `PacketType` |
-| Qualcomm decoder | `decoder/qualcomm_decoder/qualcomm_decoder.{h,cpp}` | `QualcommDecoder : Decoder` — still has `PyObject*`; Step 2 finish |
+| Qualcomm decoder | `decoder/qualcomm_decoder/qualcomm_decoder.{h,cpp}` | `QualcommDecoder : Decoder` — fully PyObject-free; `receive_log_packet`/`reset` implemented; builds into `libqualcomm_decoder.a` |
 | Log-packet parsers | `decoder/qualcomm_decoder/log_packet.{h,cpp}` + `*.h` | ~90 per-type binary parsers; unchanged |
 | Export | `export_manager/export_manager.{h,cpp}` | independent top-level module (`libexport_manager.a`); caller passes `type_id` — no frame re-parsing |
 | Python extension | `decoder/qualcomm_decoder/dm_collector_c.cpp` | legacy CPython extension; stays until Step 6 |
@@ -50,10 +50,14 @@ machines, `Profile`, XML/ASN.1 via `ws_dissector`) stays in Python for now.
 | ✅ Rewrite `_decode_by_fmt` in `log_packet_helper.h` | Signature `PyObject* result` → `FieldList& result`; all `Py_BuildValue`/`PyList_Append` replaced |
 | ✅ Rewrite `_decode_*` helpers in `log_packet.cpp` + all per-type headers | Done (Phases B+C, 2026-07-08); compiles clean, smoke-tested |
 | ✅ Rewrite `decode_log_packet`, `decode_custom_packet`, `decode_log_packet_modem` | Return `FieldList` instead of `PyObject*` |
-| `QualcommDecoder::receive_log_packet` | Frame extraction loop (HDLC unwrap, classify, call C++ decode, populate `DecodedPacket`) |
-| `QualcommDecoder::reset` | Call `reset_binary()` from `hdlc.h` |
-| Remove `PyObject*` from `qualcomm_decoder.{h,cpp}` | Drop `#include <Python.h>`, delete `get_next_packet` once `receive_log_packet` is done |
-| Fix `qualcomm_decoder.cpp` includes | Local `"log_config.h"` etc. → `"../../bytes_proto/qualcomm/"` paths |
+| ✅ `QualcommDecoder::receive_log_packet` | Frame extraction loop (HDLC unwrap, classify, call C++ decode, populate `DecodedPacket`) |
+| ✅ `QualcommDecoder::reset` | Calls `reset_binary()` from `hdlc.h` |
+| ✅ Remove `PyObject*` from `qualcomm_decoder.{h,cpp}` | `Python.h` + `get_next_packet` deleted; `~QualcommDecoder` closes the export file |
+| ✅ Fix `qualcomm_decoder.cpp` includes | `"../../bytes_proto/qualcomm/"` + `"../../export_manager/"` paths; decoder Makefile added (`libqualcomm_decoder.a`) |
+
+**Step 2 is complete** (2026-07-08): all five components build clean and link
+together; end-to-end smoke test (HDLC wire bytes → `DecodedPacket` tree +
+`.mi2log` export) passes. See the decoder plan §0 for verification detail.
 
 ---
 
@@ -302,17 +306,15 @@ instantiates the correct one from `MonitorConfig` at runtime.
 - `bytes_proto/qualcomm/` — `libqualcomm_proto.a` (hdlc, utils, consts, log_config) ✅
 - `monitor_c/monitor_config.h` — `MonitorConfig` struct ✅
 
-**Step 2 — Decoder + MonitorBase + QualcommDesktopMonitor** ← active
+**Step 2 — Decoder + MonitorBase + QualcommDesktopMonitor** ✅ complete 2026-07-08
 - `decoder/decoder.h` — `Decoder` ABC + `DecodedPacket` + `PacketType` ✅
 - `monitor_c/monitor_base.{h,cpp}` — `run()`, `set_packet_handler()` ✅
 - `monitor_c/qualcomm_desktop_monitor.{h,cpp}` — `setup()` with DIAG commands ✅
-- `decoder/qualcomm_decoder/qualcomm_decoder.{h,cpp}` — `QualcommDecoder : Decoder` ✅ (struct done)
-- Implement `QualcommDecoder::receive_log_packet` — port `get_next_packet` logic, no `PyObject*` ← **next**
-- Implement `QualcommDecoder::reset` — call `reset_binary()`  ← **next**
-- Remove `#include <Python.h>` + `get_next_packet` from `qualcomm_decoder.h` ← **next**
-- Fix `qualcomm_decoder.cpp` includes (`"log_config.h"` → `"../../bytes_proto/qualcomm/log_config.h"` etc.) ← **next**
+- `decoder/qualcomm_decoder/` — fully PyObject-free, `libqualcomm_decoder.a` ✅
+- `QualcommDecoder::receive_log_packet` + `reset` implemented; `get_next_packet` deleted ✅
+- Full-stack link + end-to-end smoke test passed ✅
 
-**Step 3 — OfflineReplayer + FileSource**
+**Step 3 — OfflineReplayer + FileSource** ← next
 - `bytes_channel/file_source.{h,cpp}`
 - `monitor_c/offline_replayer.{h,cpp}`
 
