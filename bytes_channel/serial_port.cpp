@@ -8,6 +8,7 @@
 #include <fcntl.h>     // open(), O_RDWR, O_NOCTTY
 #include <unistd.h>    // read(), write(), close()
 #include <termios.h>   // tcgetattr(), tcsetattr(), cfmakeraw(), cfsetispeed()
+#include <sys/ioctl.h> // ioctl(), TIOCMBIS, TIOCM_DTR, TIOCM_RTS
 #include <cstring>     // memset()
 #include <cstdio>      // perror(), fprintf()
 
@@ -78,6 +79,22 @@ bool SerialPort::open() {
         ::close(fd_);
         fd_ = -1;
         return false;
+    }
+
+    // Assert DTR + RTS ("terminal ready"). pyserial's Serial() raises both
+    // lines by default on open (dtr=True, rts=True are the defaults; the
+    // original tool additionally passed dsrdtr=True) — bare POSIX open() +
+    // termios does not do this on its own. Many USB DIAG/modem ports gate
+    // whether they actually start streaming unsolicited log traffic on DTR
+    // being asserted, even though basic command/response traffic can still
+    // flow without it — so config ACKs can work while no logs ever appear.
+    int status = 0;
+    if (ioctl(fd_, TIOCMGET, &status) == 0) {
+        status |= TIOCM_DTR | TIOCM_RTS;
+        if (ioctl(fd_, TIOCMSET, &status) != 0)
+            perror("SerialPort::open ioctl(TIOCMSET) - failed to assert DTR/RTS");
+    } else {
+        perror("SerialPort::open ioctl(TIOCMGET)");
     }
 
     return true;
