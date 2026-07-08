@@ -7,6 +7,7 @@
 
 #include "monitor_base.h"
 #include <cerrno>
+#include <cstdio>
 
 MonitorBase::MonitorBase(std::unique_ptr<ByteChannel> source,
                          std::unique_ptr<Decoder> decoder,
@@ -19,8 +20,14 @@ void MonitorBase::set_packet_handler(std::function<bool(const DecodedPacket&)> h
 }
 
 void MonitorBase::run() {
-    if (!setup()) return;
+    fprintf(stderr, "Trying to run monitor\n");
+
+    if (!setup()) 
+    { fprintf(stderr, "Failed monitor setup\n"); 
+        return ;
+    };
     decoder_->configure(config_);
+    fprintf(stderr, "Configured decoder\n");
 
     char buf[64];
     while (true) {
