@@ -61,6 +61,15 @@ calc_crc (UINT8 *data, size_t len, UINT16 crc)
     return crc;
 }
 
+// Print the state of buffer at any point in time
+static void
+print_hex (const char* label, const std::string &data) {
+    fprintf(stderr, "%s (%zu bytes): ", label, data.size());
+    for (size_t i = 0; i < data.size(); i++)
+        fprintf(stderr, "%02x ", (unsigned char) data[i]);
+    fprintf(stderr, "\n");
+}
+
 std::string
 encode_hdlc_frame (const char *payld, int length) {
     std::string retstr;
@@ -89,6 +98,7 @@ static std::string buffer;
 void
 feed_binary (const char *b, int length) {
     buffer.append(b, length);
+    print_hex("Received data to buffer. It is now", buffer);
 }
 
 void
@@ -96,14 +106,6 @@ reset_binary() {
     buffer.clear();
 }
 
-// Print the state of buffer at any point in time
-static void
-print_hex (const char* label, const std::string &data) {
-    fprintf(stderr, "%s (%zu bytes): ", label, data.size());
-    for (size_t i = 0; i < data.size(); i++)
-        fprintf(stderr, "%02x ", (unsigned char) data[i]);
-    fprintf(stderr, "\n");
-}
 
 static void
 unescape (std::string& frame) {
@@ -128,15 +130,15 @@ bool
 get_next_frame (std::string& output_frame, bool& crc_correct) {
     size_t delim = buffer.find('\x7e');
     if (delim == std::string::npos) {
-        //print_hex("MI(PARTIAL) no delimiter yet, pending buffer", buffer);
+        print_hex("MI(PARTIAL) no delimiter yet, pending buffer", buffer);
         return false;
     }
     output_frame = buffer.substr(0, delim);
     buffer.erase(0, delim + 1);
 
     unescape(output_frame);
-    //print_hex("MI(FRAME) delimiter found, extracted frame", output_frame);
-    //print_hex("MI(LEFTOVER) buffer remaining after this frame was processed", buffer);
+    print_hex("MI(FRAME) delimiter found, extracted frame", output_frame);
+    print_hex("MI(LEFTOVER) buffer remaining after this frame was processed", buffer);
     if (output_frame.size() <= 2) {
         crc_correct = false;
         return true;

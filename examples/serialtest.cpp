@@ -132,6 +132,7 @@ int main(int argc, char **argv) {
     MonitorConfig cfg;
     cfg.port_path = ser_port;
     cfg.baud_rate = baud_rate;
+    cfg.log_output_path = out_path;
     for (int i = 0; i < LogPacketTypeID_To_Name_n; ++i)
         cfg.type_names.push_back(LogPacketTypeID_To_Name[i].name);
 

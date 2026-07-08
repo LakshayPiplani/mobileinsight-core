@@ -33,6 +33,7 @@ void MonitorBase::run() {
     while (true) {
         ssize_t got;
         got = source_->read(buf, sizeof(buf));
+        fprintf(stderr, "Read %d bytes\n", got);
         if (got < 0) { if (errno == EINTR) continue; break; }
         if (got == 0) { break; }
 
