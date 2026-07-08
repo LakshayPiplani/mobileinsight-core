@@ -169,10 +169,6 @@ class DMCollector(Monitor):
                         # print xml
                         # print ""
                         # Send event to analyzers
-                        event = Event(timeit.default_timer(),
-                                      type_id,
-                                      packet)
-                        self.send(event)
                         _perf_pkts += 1
                         if _perf_pkts % PERF_INTERVAL == 0:
                             cpu = time.process_time() - _perf_cpu0
@@ -184,6 +180,10 @@ class DMCollector(Monitor):
                                   wall, cpu,
                                   _perf_pkts / wall,
                                   cpu / _perf_pkts * 1000.0), flush=True)
+                        event = Event(timeit.default_timer(),
+                                      type_id,
+                                      packet)
+                        self.send(event)
 
                     except FormatError as e:
                         # skip this packet
