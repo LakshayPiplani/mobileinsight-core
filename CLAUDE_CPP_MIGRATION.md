@@ -39,7 +39,7 @@ machines, `Profile`, XML/ASN.1 via `ws_dissector`) stays in Python for now.
 | Export | `export_manager/export_manager.{h,cpp}` | independent top-level module (`libexport_manager.a`); caller passes `type_id` — no frame re-parsing |
 | Python extension | `decoder/qualcomm_decoder/dm_collector_c.cpp` | legacy CPython extension; stays until Step 6 |
 | Monitor base | `monitor_c/monitor_base.{h,cpp}` | `MonitorBase` with `run()`, `set_packet_handler()` |
-| Qualcomm desktop monitor | `monitor_c/qualcomm_desktop_monitor.{h,cpp}` | `setup()` fully implemented: `disable_log_all` → `enable_log` |
+| Qualcomm desktop monitor | `monitor_c/qualcomm_desktop_monitor.{h,cpp}` | `setup()` fully implemented: `disable_log_all` → `enable_log`, each command awaiting its DIAG response frame (`await_response()` — the modem drops back-to-back commands). **Validated live on hardware 2026-07-08**: 68 NR RRC/NAS packets over `/dev/ttyUSB0`, SIB1 byte-identical to the Android reference capture |
 | Monitor build | `monitor_c/Makefile` | links `libbytes_channel.a + libqualcomm_proto.a` |
 
 ### 1.2 Remaining in Step 2
