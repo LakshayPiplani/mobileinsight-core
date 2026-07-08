@@ -42,10 +42,12 @@ bool QualcommDesktopMonitor::send_command(const char *b, int length) {
 }
 
 bool QualcommDesktopMonitor::enable_log(const std::vector<std::string>& type_names) {
+
     return generate_log_config_msgs_serial(type_names);
 }
 
 bool QualcommDesktopMonitor::enable_log_all() {
+    fprintf(stderr, "Tryng to enable all logs\n");
     return enable_log(available_log_types());
 }
 
@@ -56,6 +58,10 @@ bool QualcommDesktopMonitor::disable_log_all()
     if (buf.first == NULL || buf.second == 0)
         return false;
     bool ok = send_command(buf.first, buf.second);
+    if (ok) {
+        fprintf(stderr, "Sent disable command to buffer command %s\n", buf.first);
+    }
+    
     delete[] buf.first;
     return ok;
 }
@@ -67,7 +73,6 @@ bool QualcommDesktopMonitor::generate_log_config_msgs_serial(const std::vector<s
     if (!success) {
         return false;
     }
-
     BinaryBuffer buf;
     IdVector::iterator debug_ind = type_ids.begin();
     for (; debug_ind != type_ids.end(); debug_ind++) {
@@ -92,7 +97,9 @@ bool QualcommDesktopMonitor::generate_log_config_msgs_serial(const std::vector<s
         const IdVector &v = type_id_vectors[i];
         buf = encode_log_config(SET_MASK, v);
         if (buf.first != NULL && buf.second != 0) {
-            send_command(buf.first, buf.second);
+            fprintf(stderr, "Sending enable command for type_ids\n");
+            for (const int j: v) fprintf(stderr, "%d\n", j);
+            if (!send_command(buf.first, buf.second)) fprintf(stderr, "Failed to enable this log bucket\n");
             delete[] buf.first;
         } else {
             // PyErr_SetString(PyExc_RuntimeError, "Log config msg failed to encode.");
