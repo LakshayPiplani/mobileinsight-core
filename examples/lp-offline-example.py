@@ -32,7 +32,7 @@ if __name__ == "__main__":
     logger = MsgLogger()
     logger.set_decode_format(MsgLogger.XML)
     logger.set_dump_type(MsgLogger.FILE_ONLY)
-    logger.save_decoded_msg_as("./decoded-EA0-lp.txt")
+    logger.save_decoded_msg_as("./decoded-EA0-lp-Jun30.txt")
     logger.set_source(src)
 
     # # Analyzers
