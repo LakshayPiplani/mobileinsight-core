@@ -1,5 +1,8 @@
 CXX      := g++
 CXXFLAGS := -std=c++17 -Wall -fPIC -I.
+# Cross-compilation switch: overrides CXX/AR/LDFLAGS when TARGET=android.
+include ../android.mk
+
 
 SRCS := export_manager.cpp
 OBJS := $(SRCS:.cpp=.o)
@@ -8,7 +11,7 @@ LIB  := libexport_manager.a
 all: $(LIB)
 
 $(LIB): $(OBJS)
-	ar rcs $@ $^
+	$(AR) rcs $@ $^
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@

@@ -1,17 +1,16 @@
 /* replay_mi2log.cpp
  *
- * Replays a .mi2log capture through the full monitor stack by mocking the
- * serial source as a file:
+ * Replays a .mi2log capture through the full monitor stack:
  *
- *   FileMockSerialPort (reads the .mi2log)
- *       -> QualcommDesktopMonitor::run()
+ *   FileSource (reads the .mi2log)
+ *       -> OfflineReplayer::run()
  *       -> QualcommDecoder (HDLC unwrap + decode to FieldList)
  *       -> packet handler dumps every DecodedPacket to a text file
  *
  * Usage: ./replay_mi2log [input.mi2log] [output.txt]
  */
 
-#include "../monitor_c/qualcomm_desktop_monitor.h"
+#include "../monitor_c/offline_replayer.h"
 #include "../bytes_proto/qualcomm/consts.h"
 #include "../ws_dissector_client/ws_dissector_client.h"
 
@@ -23,37 +22,6 @@
 #include <sstream>
 #include <string>
 #include <unistd.h>   // access()
-
-// ---------------------------------------------------------------------------
-// Mock serial port backed by a file. QualcommDesktopMonitor's constructor
-// takes a SerialPort, so we subclass it and override the ByteChannel virtuals;
-// the real termios fd stays at -1 and is never touched. DIAG commands the
-// monitor sends during setup() (disable_log_all / SET_MASK) are swallowed.
-// ---------------------------------------------------------------------------
-class FileMockSerialPort : public SerialPort {
-    std::string path_;
-    FILE *fp_ = nullptr;
-public:
-    explicit FileMockSerialPort(const std::string &path)
-        : SerialPort(path, 0), path_(path) {}
-    ~FileMockSerialPort() override { close(); }
-
-    bool open() override {
-        fp_ = fopen(path_.c_str(), "rb");
-        if (!fp_) perror(("open " + path_).c_str());
-        return fp_ != nullptr;
-    }
-    void close() override {
-        if (fp_) { fclose(fp_); fp_ = nullptr; }
-    }
-    bool is_open() const override { return fp_ != nullptr; }
-
-    ssize_t read(char *buf, size_t n) override {
-        if (!fp_) return -1;
-        return (ssize_t) fread(buf, 1, n, fp_);   // 0 at EOF ends run()
-    }
-    bool write(const char *, size_t) override { return true; }
-};
 
 // ---------------------------------------------------------------------------
 // Recursive FieldList -> text dump
@@ -193,9 +161,9 @@ int main(int argc, char **argv) {
     };
 
     // ---- wire up the stack and run ----
-    QualcommDesktopMonitor monitor(std::make_unique<FileMockSerialPort>(in_path),
-                                   std::make_unique<QualcommDecoder>(),
-                                   cfg);
+    OfflineReplayer monitor(std::make_unique<FileSource>(in_path),
+                            std::make_unique<QualcommDecoder>(),
+                            cfg);
     monitor.set_packet_handler(handler);
     monitor.run();   // setup() -> configure() -> read/feed/decode until EOF
 

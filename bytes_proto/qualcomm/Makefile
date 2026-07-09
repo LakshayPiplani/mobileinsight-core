@@ -18,6 +18,9 @@ CXX      := g++
 #              linked into a .so (needed for Python extension and Android .so)
 # -I.          look for headers in this directory (utils.h, consts.h, etc.)
 CXXFLAGS := -std=c++17 -Wall -fPIC -I.
+# Cross-compilation switch: overrides CXX/AR/LDFLAGS when TARGET=android.
+include ../../android.mk
+
 
 # ── Sources and derived names ─────────────────────────────────────────────────
 
@@ -44,7 +47,7 @@ all: $(LIB)
 #   $@    expands to the rule's target name  →  libqualcomm_proto.a
 #   $^    expands to all prerequisites       →  utils.o log_config.o consts.o
 $(LIB): $(OBJS)
-	ar rcs $@ $^
+	$(AR) rcs $@ $^
 
 # Pattern rule: compile any .cpp into a .o.
 #   %     wildcard that matches the same stem on both sides

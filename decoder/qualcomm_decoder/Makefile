@@ -1,5 +1,8 @@
 CXX      := g++
 CXXFLAGS := -std=c++17 -Wall -fPIC -I. -I../../bytes_proto/qualcomm
+# Cross-compilation switch: overrides CXX/AR/LDFLAGS when TARGET=android.
+include ../../android.mk
+
 
 # dm_collector_c.cpp is the legacy CPython extension — excluded; it is
 # deleted at Step 6 of the parent migration plan.
@@ -10,7 +13,7 @@ LIB  := libqualcomm_decoder.a
 all: $(LIB)
 
 $(LIB): $(OBJS)
-	ar rcs $@ $^
+	$(AR) rcs $@ $^
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@

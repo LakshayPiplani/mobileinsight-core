@@ -1,0 +1,134 @@
+/* android_qc_capture.cpp
+ * Live-capture driver for AndroidQcMonitor (analogous to serialtest.cpp for
+ * the desktop serial path). Spawns diag_revealer, reads the chronicle FIFO,
+ * decodes, and dumps every DecodedPacket to a text file.
+ *
+ * Usage:
+ *   android_qc_capture <diag_revealer> [fifo] [diag_cfg] [log_dir] [out] [-v] [--no-su]
+ *
+ * Defaults are relative paths suitable for an on-device shell session:
+ *   fifo     ./diag_revealer_fifo
+ *   diag_cfg ./Diag.cfg
+ *   log_dir  ./mi2log
+ *   out      android_decoded.txt
+ *
+ * --no-su spawns diag_revealer directly through /bin/sh instead of
+ * `su -c` via /system/bin/sh -- for desktop testing against a mock
+ * diag_revealer (no /dev/diag, no root).
+ */
+
+#include "../monitor_c/android_qc_monitor.h"
+#include "../bytes_proto/qualcomm/consts.h"
+
+#include <cstdio>
+#include <cstdint>
+#include <fstream>
+#include <iomanip>
+#include <memory>
+#include <string>
+#include <vector>
+
+static void dump_fields(std::ofstream &out, const FieldList &fields, int indent) {
+    const std::string pad(indent * 2, ' ');
+    for (const FieldEntry &e : fields) {
+        out << pad << e.name;
+        if (!e.type_hint.empty())
+            out << " [" << e.type_hint << "]";
+        out << ": ";
+        if (const auto *i = std::get_if<int64_t>(&e.value.data)) {
+            out << *i << "\n";
+        } else if (const auto *d = std::get_if<double>(&e.value.data)) {
+            out << *d << "\n";
+        } else if (const auto *s = std::get_if<std::string>(&e.value.data)) {
+            out << *s << "\n";
+        } else if (const auto *raw = std::get_if<std::vector<uint8_t>>(&e.value.data)) {
+            out << raw->size() << " bytes:";
+            char hex[4];
+            for (uint8_t b : *raw) {
+                snprintf(hex, sizeof(hex), " %02x", b);
+                out << hex;
+            }
+            out << "\n";
+        } else if (const auto *sub = std::get_if<FieldList>(&e.value.data)) {
+            out << "\n";
+            dump_fields(out, *sub, indent + 1);
+        }
+    }
+}
+
+static const char *packet_type_name(PacketType t) {
+    switch (t) {
+        case LOG_PACKET:    return "LOG";
+        case DEBUG_PACKET:  return "DEBUG";
+        case CUSTOM_PACKET: return "CUSTOM";
+    }
+    return "?";
+}
+
+int main(int argc, char **argv) {
+    bool verbose = false;
+    bool use_su  = true;
+    std::vector<std::string> pos;
+    for (int i = 1; i < argc; i++) {
+        std::string a = argv[i];
+        if (a == "-v" || a == "--verbose") verbose = true;
+        else if (a == "--no-su")           use_su = false;
+        else pos.push_back(a);
+    }
+    if (pos.empty()) {
+        fprintf(stderr, "usage: %s <diag_revealer> [fifo] [diag_cfg] [log_dir] [out] [-v] [--no-su]\n",
+                argv[0]);
+        return 1;
+    }
+
+    DiagRevealerParams params;
+    params.exe_path      = pos[0];
+    params.fifo_path     = pos.size() > 1 ? pos[1] : "./diag_revealer_fifo";
+    params.diag_cfg_path = pos.size() > 2 ? pos[2] : "./Diag.cfg";
+    params.log_dir       = pos.size() > 3 ? pos[3] : "./mi2log";
+    params.use_su        = use_su;
+    if (!use_su)
+        params.shell_path = "/bin/sh";   // desktop mock run; no /system/bin/sh
+    const std::string out_path = pos.size() > 4 ? pos[4] : "android_decoded.txt";
+
+    // Whitelist every known type, same as replay_mi2log.cpp, so packet
+    // counts from a mock replay are directly comparable. For a real capture
+    // you may want to trim this to the types of interest (fewer SET_MASK
+    // entries in Diag.cfg -> less modem load).
+    MonitorConfig cfg;
+    cfg.verbose = verbose;
+    cfg.perf_interval = 10;
+    for (int i = 0; i < LogPacketTypeID_To_Name_n; i++)
+        cfg.type_names.push_back(LogPacketTypeID_To_Name[i].name);
+
+    std::ofstream out(out_path);
+    if (!out) {
+        fprintf(stderr, "cannot open %s for writing\n", out_path.c_str());
+        return 1;
+    }
+
+    int n_packets = 0;
+    auto handler = [&](const DecodedPacket &pkt) -> bool {
+        ++n_packets;
+        out << "===== Packet " << n_packets
+            << " | type=" << packet_type_name(pkt.type)
+            << " | ok=" << (pkt.ok ? "true" : "false")
+            << " | recv_timestamp=" << std::fixed << std::setprecision(6)
+            << pkt.timestamp << " =====\n";
+        dump_fields(out, pkt.fields, 0);
+        out << "\n";
+        // Live capture ends with Ctrl-C, before ~ofstream flushes.
+        out.flush();
+        fprintf(stderr, "\r[android_qc] decoded %d packet(s)", n_packets);
+        return true;
+    };
+
+    AndroidQcMonitor monitor(std::make_unique<DiagFifoSource>(params.fifo_path),
+                             std::make_unique<QualcommDecoder>(),
+                             cfg, params);
+    monitor.set_packet_handler(handler);
+    monitor.run();   // setup() (Diag.cfg -> mkfifo -> spawn -> open) -> read loop
+
+    printf("\ndecoded %d packet(s) -> %s\n", n_packets, out_path.c_str());
+    return 0;
+}

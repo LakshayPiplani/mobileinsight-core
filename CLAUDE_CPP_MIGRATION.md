@@ -41,6 +41,7 @@ machines, `Profile`, XML/ASN.1 via `ws_dissector`) stays in Python for now.
 | Monitor base | `monitor_c/monitor_base.{h,cpp}` | `MonitorBase` with `run()`, `set_packet_handler()` |
 | Qualcomm desktop monitor | `monitor_c/qualcomm_desktop_monitor.{h,cpp}` | `setup()` fully implemented: `disable_log_all` → `enable_log`, each command awaiting its DIAG response frame (`await_response()` — the modem drops back-to-back commands). **Validated live on hardware 2026-07-08**: 68 NR RRC/NAS packets over `/dev/ttyUSB0`, SIB1 byte-identical to the Android reference capture |
 | Monitor build | `monitor_c/Makefile` | links `libbytes_channel.a + libqualcomm_proto.a` |
+| Android Qc monitor | `monitor_c/android_qc_monitor.{h,cpp}` | `setup()`: Diag.cfg generation → mkfifo → spawn diag_revealer (`su -c`) → open FIFO. **Mock-validated end-to-end 2026-07-09** (14404 pkts, identical to OfflineReplayer baseline); on-device run pending |
 
 ### 1.2 Remaining in Step 2
 
@@ -58,6 +59,24 @@ machines, `Profile`, XML/ASN.1 via `ws_dissector`) stays in Python for now.
 **Step 2 is complete** (2026-07-08): all five components build clean and link
 together; end-to-end smoke test (HDLC wire bytes → `DecodedPacket` tree +
 `.mi2log` export) passes. See the decoder plan §0 for verification detail.
+
+### 1.3 Known bugs found during testing (not yet fixed)
+
+- **`Modem_debug_message` decode crashes**: `_search_result_int(result,
+  "Version")` in `_decode_modem_debug_msg` (`log_packet.cpp` ~line 9457) hits
+  `assert(item != NULL)` in `log_packet_helper.h:95` for at least some debug
+  packets in `examples/offline_log_example.mi2log` (crashes at packet
+  ~8748/8770 replaying that file — the packets immediately before are also
+  `Modem_debug_message` and decode fine, so it's data-dependent, not
+  universal). Not a Step 3 regression — same decoder code path either monitor
+  uses; confirmed by checking the two other test captures contain **zero**
+  `Modem_debug_message` frames, so this is simply the first file that ever
+  exercised this branch. `log_packet_helper.h` has ~10 other bare `assert()`
+  call sites following the identical pattern discovered earlier for odd
+  `UINT` widths (see decoder plan): likely compiled out via `-DNDEBUG` in the
+  official Python extension builds, live/fatal here. Needs investigation
+  before Step 3's `replay_mi2log` can be trusted on arbitrary captures
+  containing debug messages.
 
 ---
 
@@ -109,8 +128,8 @@ Concrete implementations, in build order:
 | Class | File | Wraps | Status |
 |---|---|---|---|
 | `SerialPort` | `bytes_channel/serial_port.{h,cpp}` | POSIX `termios` fd | ✅ done |
-| `FileSource` | `bytes_channel/file_source.{h,cpp}` | plain file `read()` | Step 3 |
-| `DiagFifoSource` | `bytes_channel/diag_fifo_source.{h,cpp}` | FIFO + `diag_revealer` subprocess | Step 4 |
+| `FileSource` | `bytes_channel/file_source.{h,cpp}` | plain file `read()` | ✅ done |
+| `DiagFifoSource` | `bytes_channel/diag_fifo_source.{h,cpp}` | FIFO chronicle-unwrap; `diag_revealer` spawned by the monitor | ✅ done (Step 4a) |
 | `MtkMuxrawSource` | `bytes_channel/mtk_muxraw_source.{h,cpp}` | directory-poll + `.muxraw.tmp` read | Step 5 |
 
 ### 2.2 Protocol library — `bytes_proto/qualcomm/`
@@ -314,13 +333,149 @@ instantiates the correct one from `MonitorConfig` at runtime.
 - `QualcommDecoder::receive_log_packet` + `reset` implemented; `get_next_packet` deleted ✅
 - Full-stack link + end-to-end smoke test passed ✅
 
-**Step 3 — OfflineReplayer + FileSource** ← next
-- `bytes_channel/file_source.{h,cpp}`
-- `monitor_c/offline_replayer.{h,cpp}`
+**Step 3 — OfflineReplayer + FileSource** ✅ complete 2026-07-09
+- `bytes_channel/file_source.{h,cpp}` — plain `fopen`/`fread`; 0 at EOF (no
+  offline-specific handling needed in `MonitorBase::run()`) ✅
+- `monitor_c/offline_replayer.{h,cpp}` — `setup()` just opens the file, no
+  DIAG handshake ✅
+- `examples/replay_mi2log.cpp` now uses the real `FileSource`/`OfflineReplayer`
+  (the old `FileMockSerialPort` subclass-of-`SerialPort` hack is gone) ✅
+- Regression-tested against 3 captures: `lp_EA0_Jun30_DeregCheck.mi2log` (78
+  pkts) and `test_log_dl_retx.mi2log` (14404 pkts) match prior counts exactly.
+  `offline_log_example.mi2log` hit a **pre-existing decoder bug**, unrelated
+  to this step (see §1.2 below) — first file in this project to contain
+  `Modem_debug_message` frames, which no prior test exercised.
+- Directory-of-files replay (Python's `OfflineReplayer` accepts a dir and
+  iterates `.mi2log`/`.qmdl` inside, `reset()` between files) intentionally
+  **not** ported — out of scope per this table's "plain file `read()`"
+  description; `MonitorBase::run()` is non-virtual so multi-file iteration
+  with per-file decoder reset would need base-class changes. Revisit if
+  needed.
 
-**Step 4 — AndroidQcMonitor + DiagFifoSource**
-- `bytes_channel/diag_fifo_source.{h,cpp}`
-- `monitor_c/android_qc_monitor.{h,cpp}`
+**Step 4 — AndroidQcMonitor + DiagFifoSource** ← 4a + 4b + local 4c done (2026-07-09); on-device validation pending
+
+Replaces `mobile_insight/monitor/android_dev_diag_monitor.py`. Requires a
+rooted Android device (`/dev/diag` is root-only); the `diag_revealer` helper
+we spawn is the one at `mobileinsight-mobile_withwireshark/diag_revealer/qcom/`
+— **we own and may modify that source**, so the FIFO wire format below is a
+private protocol between it and `DiagFifoSource` (change one, change both).
+
+*4a. `bytes_channel/diag_fifo_source.{h,cpp}`* ✅ done + unit-tested
+- `DiagFifoSource : ByteChannel`. `diag_revealer` reads `/dev/diag` and relays
+  each message over a FIFO wrapped in a "chronicle" header. Wire format (from
+  `diag_revealer.c`'s write loop, issued as 4 separate `write()` syscalls per
+  LOG record): `[type:int16 LE][len:int16 LE]` then, for TYPE_LOG(=1),
+  `[ts:double LE][payload: len-8]`; for TYPE_START/END_LOG_FILE(=2/3),
+  `[filename: len]`.
+- `read()` runs a byte-wise state machine unwrapping that framing and hands
+  back **only** payload bytes, queued via `pending_` so a >64B payload spans
+  several `MonitorBase::run()` reads (its buffer is 64B). Never returns a
+  spurious 0 on a partial chronicle field (only on true FIFO EOF) — a naive
+  1-read-return-what-you-got would look like EOF and kill a live capture,
+  because those 4 writes cross pipe-buffer boundaries.
+- **No decoder bypass needed.** Verified the FIFO `payload` bytes are genuine
+  HDLC frames (0x7e-delimited, CRC16): `diag_revealer.c` writes the *same*
+  `(buf_read+offset+4, msg_len)` region to both the FIFO (line 1198) and its
+  on-disk `.mi2log` (line 1211, `fwrite`), and files from that on-disk path
+  already decode correctly through our HDLC-based `QualcommDecoder`. So
+  `DiagFifoSource` → `decoder_->feed()` is identical to the `SerialPort` path;
+  `QualcommDecoder`/`MonitorBase`/`Decoder` ABC need zero changes. (The
+  earlier idea of a decoder-level "already-framed, skip HDLC" bypass is
+  dropped — unnecessary. If HDLC ever moves into `bytes_channel`, revisit.)
+- Unit test (scratchpad `test_diag_fifo.cpp`): real fifo + mock writer using
+  the exact 4-write-per-record framing with inter-write delays to force
+  fragmentation; a 300B payload + a 3B payload + START/END rotation records;
+  reads through a 64B buffer. Verifies byte-exact reconstruction, multi-call
+  drain actually exercised (6 data reads for 303B), clean EOF, ts capture.
+
+*4b. `monitor_c/android_qc_monitor.{h,cpp}`* ✅ done (2026-07-09)
+- `AndroidQcMonitor : MonitorBase`, source = `DiagFifoSource`, decoder =
+  `QualcommDecoder`. Ctor takes a `DiagRevealerParams` struct with the
+  process-lifecycle params that are the monitor's concern (not the
+  channel's): `exe_path`, `fifo_path`, `diag_cfg_path`, `log_dir`,
+  `log_cut_size` (0.5 MB default, Python's "DO NOT CHANGE" value), plus two
+  testability knobs: `shell_path` (default `/system/bin/sh` = ANDROID_SHELL)
+  and `use_su` (default true; false spawns directly, for desktop mock runs
+  without root). Mirrors how `send_command`/`await_response` live on
+  `QualcommDesktopMonitor`, not `SerialPort`.
+- `setup()` (ordering mirrors Python `run()`):
+  1. Generate `Diag.cfg` from `config_.type_names` — ported
+     `dm_collector_c_generate_diag_cfg()`: 12× `DIAG_BEGIN_*`,
+     `DISABLE_DEBUG` + `DISABLE` (that order), `DEBUG_WCDMA_L1` iff
+     `Modem_debug_message` requested, `SET_MASK` batches via
+     `sort_type_ids` + `encode_log_config`, `DIAG_END_6000`; each message
+     HDLC-encoded and `fwrite`n (same on-disk format as
+     `send_msg_to_pyobj`). Python-parity fallbacks: `type_names[0]=="all"`
+     expands to all public types; empty `type_names` reuses an existing
+     Diag.cfg on disk, else fails.
+  2. `make_fifo()`: unlink-if-exists then `mkfifo(0666)`; EEXIST tolerated;
+     `su -c mknod <path> p` fallback on EPERM.
+  3. `spawn_diag_revealer()`: dir prep (`chmod`/`mkdir`/`chmod` via shell,
+     failures tolerated, exactly like Python), then fork/exec
+     `sh -c "su -c <exe> <Diag.cfg> <fifo> <outdir> <cutsize>"` — the exact
+     Python `Popen("su -c " + cmd, shell=True)` form, unquoted args and all.
+     Stores the wrapper-shell pid (`revealer_pid()`; it is `su`'s pid, not
+     diag_revealer's — same limitation Python has).
+  4. `source_->open()` on the FIFO (blocks until diag_revealer opens the
+     write end).
+  Then `MonitorBase::run()`'s existing read/feed/decode loop just works.
+- Compiles clean with `-Wall -Wextra`; added to `monitor_c/Makefile` and
+  linked into `examples/`.
+- **Deliberately deferred** (not core to "decode live Android diag"):
+  - *Liveness watchdog / auto-restart.* Python's `DiagRevealerDaemon` polls
+    `ps | grep diag_revealer` every 5s because it loses the child PID (spawns
+    via `su -c "..."`, so the tracked proc is `su`). In C++ a dead
+    diag_revealer surfaces as FIFO EOF → `read()` returns 0 →
+    `MonitorBase::run()` stops cleanly (detection is free). Auto-restart is a
+    resilience follow-up.
+  - *`new_diag_log` file-rotation events.* `DiagFifoSource` already parses
+    START/END_LOG_FILE records but discards them; surfacing them (Python emits
+    a `new_diag_log` event) needs a callback hook — not needed for decoding.
+  - *diag_revealer teardown* (kill on exit): mirror Python's `_stop_collection`
+    later; `~AndroidQcMonitor` should at least close the FIFO.
+
+*4c. Testing* — local mock end-to-end ✅ passed (2026-07-09):
+- `examples/android_qc_capture.cpp` (built by `examples/Makefile`) — driver
+  analogous to `serialtest.cpp`: whitelists all types (comparable to
+  `replay_mi2log`), dumps every packet, `--no-su` switches to `/bin/sh` +
+  direct spawn for desktop testing.
+- Mock (scratchpad `mock_diag_revealer.py`): same argv contract as the real
+  diag_revealer; streams `test_log_dl_retx.mi2log` into the fifo with the
+  exact 4-writes-per-record chronicle framing, bracketed by START/END
+  rotation records; asserts Diag.cfg exists+non-empty before streaming.
+- Result: **14404 packets, count and dump content identical** to the
+  `OfflineReplayer` baseline on the same file (diff clean after stripping
+  recv timestamps) at ~3370 pkt/s. So Diag.cfg generation, mkfifo, spawn,
+  blocking FIFO open, chronicle unwrap, decode, and clean EOF stop are all
+  exercised in one run.
+- Diag.cfg sanity: 21 HDLC frames for the all-types list = 12 headers + 2
+  disables + 1 `DEBUG_WCDMA_L1` + 5 `SET_MASK` batches + 1 end; first frame
+  `1d 1c 3b 7e` as expected.
+- **Remaining, on-device only:** `su -c` spawn with the real diag_revealer +
+  `/dev/diag` on the rooted phone; byte-exact Diag.cfg vs a
+  Python-`generate_diag_cfg` reference (the compiled `dm_collector_c`
+  extension only exists on the VM/phone).
+
+*4d. Android cross-compilation* ✅ wired (2026-07-09) — `android.mk` at the
+repo root, included by all 7 Makefiles (each right after its CXX/CXXFLAGS
+defaults; `ar rcs` became `$(AR) rcs`; examples' link lines gained
+`$(LDFLAGS)`).
+- `make -C examples TARGET=android [NDK=/path/to/ndk] [API=21]` — TARGET/NDK
+  propagate to the recursive `deps` sub-makes via MAKEFLAGS (verified, all 7
+  activate). NDK lookup: explicit `NDK=` > `$ANDROID_NDK_HOME` >
+  `$ANDROID_NDK_ROOT`; clear `$(error)` if absent or the clang wrapper is
+  missing.
+- Targets arm64-v8a / android-21 via the NDK's target-prefixed
+  `aarch64-linux-android21-clang++` (r19+ layout; the VM has r19b at
+  `~/android-ndk-r19b` with `ANDROID_NDK_HOME` set). `-static-libstdc++`
+  gives dependency-free binaries. AR resolves to llvm-ar > r19's GNU
+  binutils ar > host ar.
+- **Gotcha:** host and Android builds share object/lib/binary file names —
+  always `make -C examples clean-all` when switching targets, or the link
+  mixes architectures (fails loudly, but confusingly).
+- Not testable on this dev box (no NDK): verified via fake-NDK dry-run
+  (correct compiler/ar/ldflags in every dir) + untouched host rebuild.
+  First real cross-build happens on the VM.
 
 **Step 5 — AndroidMtkMonitor + MtkMuxrawSource + MtkDecoder**
 Largest piece: `MtkDecoder` has no C++ reference — `mtk_log_parser.py` must
