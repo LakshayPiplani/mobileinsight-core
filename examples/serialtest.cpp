@@ -155,6 +155,12 @@ int main(int argc, char **argv) {
         "5G_NR_NAS_SM_Plain_OTA_Outgoing_Msg",
         "5G_NR_NAS_MM_Plain_OTA_Incoming_Msg",
         "5G_NR_NAS_MM_Plain_OTA_Outgoing_Msg",
+        "5G_NR_PDCP_UL_Control_Pdu",
+        "5G_NR_RLC_DL_Stats",
+        "5G_NR_MAC_UL_TB_Stats",
+        "5G_NR_MAC_UL_Physical_Channel_Schedule_Report",
+        "5G_NR_MAC_PDSCH_Stats",
+        "5G_NR_MAC_RACH_Trigger"
     };
 
     // ---- output + handler ----
