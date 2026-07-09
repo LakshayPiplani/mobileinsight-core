@@ -138,6 +138,7 @@ int main(int argc, char **argv) {
     cfg.port_path = ser_port;
     cfg.baud_rate = baud_rate;
     cfg.verbose = verbose;
+    cfg.perf_interval = 10;   // print a [PERF] line every 10 packets
     // NOTE: do NOT point log_output_path at out_path. out_path is written by
     // our own std::ofstream (text dump) below; log_output_path is opened
     // separately by the decoder's export_manager (raw binary .mi2log,
