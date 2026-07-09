@@ -177,52 +177,81 @@ class OfflineReplayer(Monitor):
 
             log_list.sort()  # Hidden assumption: logs follow the diag_log_TIMSTAMP_XXX format
 
-            decoding_inter = 0
-            sending_inter = 0
+            # --- performance counters ---
+            # Same sandwich as DMCollector.run(): the timed window is
+            #   file read -> feed_binary -> receive_log_packet -> DMLogPacket
+            # accumulated per iteration; type_id lookup / Event dispatch /
+            # analyzers / printing are outside the window. cpu = accumulated
+            # process CPU inside the window; wall (for pkt/s) = overall
+            # elapsed since the loop started (across all files in log_list).
+            PERF_INTERVAL = 10
+            _perf_pkts  = 0
+            _perf_reads = 0
+            _perf_cpu_acc  = 0.0
+            _perf_wall_acc = 0.0
+            _perf_wall0 = time.perf_counter()
+            # ----------------------------
+
             for file in log_list:
                 self.log_info("Loading " + file)
                 self.log_info('Loading: ' + str(time.time()))
                 self._input_file = open(file, "rb")
                 dm_collector_c.reset()
                 while True:
+                    _t_cpu0  = time.process_time()   # sandwich: open
+                    _t_wall0 = time.perf_counter()
+
                     s = self._input_file.read(64)
+                    _perf_reads += 1
 
                     if s:
                         dm_collector_c.feed_binary(s)
-                    
+
                     decoded = dm_collector_c.receive_log_packet(self._skip_decoding,
                                                                 True,   # include_timestamp
                                                                 )
+                    packet = None
+                    try:
+                        if decoded and decoded[0]:
+                            packet = DMLogPacket(decoded[0])
+                    except FormatError as e:
+                        # skip this packet
+                        print(("FormatError: ", e))
+                        packet = None
+
+                    _perf_cpu_acc  += time.process_time() - _t_cpu0   # sandwich: close
+                    _perf_wall_acc += time.perf_counter() - _t_wall0
+
                     if not s and not decoded:
                         # EOF encountered and no message can be received any more
                         break
 
-                    if decoded:
-                        try:
-                            before_decode_time = time.time()
-                            # self.log_info('Before decoding: ' + str(time.time()))
-                            if not decoded[0]:
-                                continue
+                    if packet is None:
+                        continue
 
-                            packet = DMLogPacket(decoded[0])
-                            type_id = packet.get_type_id()
-                            after_decode_time = time.time()
-                            decoding_inter += after_decode_time - before_decode_time
+                    try:
+                        type_id = packet.get_type_id()
 
-                            if type_id in self._type_names or type_id == "Custom_Packet":
-                                event = Event(timeit.default_timer(),
-                                              type_id,
-                                              packet)
-                                self.send(event)
-                            after_sending_time = time.time()
-                            sending_inter += after_sending_time - after_decode_time
-                            # self.log_info('After sending event: ' + str(time.time()))
+                        _perf_pkts += 1
+                        if _perf_pkts % PERF_INTERVAL == 0:
+                            wall = time.perf_counter() - _perf_wall0
+                            print("[PERF] pkts=%d reads=%d | "
+                                  "wall=%.3fs cpu=%.3fs | "
+                                  "%.1f pkt/s  cpu/pkt=%.3fms" % (
+                                  _perf_pkts, _perf_reads,
+                                  wall, _perf_cpu_acc,
+                                  _perf_pkts / wall,
+                                  _perf_cpu_acc / _perf_pkts * 1000.0), flush=True)
 
-                        except FormatError as e:
-                            # skip this packet
-                            print(("FormatError: ", e))
-                self.log_info('Decoding_inter: ' + str(decoding_inter))
-                self.log_info('sending_inter: ' + str(sending_inter))
+                        if type_id in self._type_names or type_id == "Custom_Packet":
+                            event = Event(timeit.default_timer(),
+                                          type_id,
+                                          packet)
+                            self.send(event)
+
+                    except FormatError as e:
+                        # skip this packet
+                        print(("FormatError: ", e))
                 self._input_file.close()
 
         except Exception as e:
