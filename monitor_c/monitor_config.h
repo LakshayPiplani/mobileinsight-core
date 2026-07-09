@@ -17,5 +17,9 @@ struct MonitorConfig {
     std::string log_output_path;
     double      sampling_rate  = 1.0;
     bool        verbose        = false;  // opt-in debug tracing (setup, I/O, frame classification)
+    int         perf_interval  = 0;      // print a [PERF] line every N packets; 0 = off.
+                                         // Same line format/semantics as the ea0_option
+                                         // Python branch's sandwiched counters, so runs
+                                         // can be compared directly.
 };
 

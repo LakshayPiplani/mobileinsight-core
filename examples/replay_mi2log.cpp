@@ -169,6 +169,7 @@ int main(int argc, char **argv) {
     // every known type explicitly ("all" would match nothing there).
     MonitorConfig cfg;
     cfg.port_path = in_path;
+    cfg.perf_interval = 10;   // print a [PERF] line every 10 packets
     for (int i = 0; i < LogPacketTypeID_To_Name_n; ++i)
         cfg.type_names.push_back(LogPacketTypeID_To_Name[i].name);
 
