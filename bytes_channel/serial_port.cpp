@@ -9,6 +9,7 @@
 #include <unistd.h>    // read(), write(), close()
 #include <termios.h>   // tcgetattr(), tcsetattr(), cfmakeraw(), cfsetispeed()
 #include <sys/ioctl.h> // ioctl(), TIOCMBIS, TIOCM_DTR, TIOCM_RTS
+#include <cerrno>      // errno, EINVAL
 #include <cstring>     // memset()
 #include <cstdio>      // perror(), fprintf()
 

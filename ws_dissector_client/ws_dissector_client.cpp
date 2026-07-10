@@ -3,6 +3,7 @@
 #include "ws_dissector_client.h"
 
 #include <arpa/inet.h>   // htonl
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
