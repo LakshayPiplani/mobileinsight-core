@@ -48,5 +48,12 @@ ifeq ($(TARGET),android)
   # the phone (bionic itself is always present).
   LDFLAGS += -static-libstdc++
 
+  # log_packet_helper.h redefines printf() to __android_log_print() whenever
+  # __ANDROID__ is defined (true for every NDK clang invocation, unlike the
+  # host build) -- a native binary has nowhere to send stdout debug prints
+  # on-device anyway, so this redirects them to logcat instead. liblog.so
+  # provides that symbol.
+  LDFLAGS += -llog
+
   $(info [android.mk] cross-compiling: CXX=$(CXX))
 endif

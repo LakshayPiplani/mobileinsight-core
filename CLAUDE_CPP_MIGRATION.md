@@ -475,7 +475,23 @@ defaults; `ar rcs` became `$(AR) rcs`; examples' link lines gained
   mixes architectures (fails loudly, but confusingly).
 - Not testable on this dev box (no NDK): verified via fake-NDK dry-run
   (correct compiler/ar/ldflags in every dir) + untouched host rebuild.
-  First real cross-build happens on the VM.
+
+**First real cross-build on the VM (2026-07-09), bugs found + fixed:**
+- Two pre-existing files used `errno`/`EINTR` without `#include <cerrno>`
+  (`ws_dissector_client/ws_dissector_client.cpp`,
+  `bytes_channel/serial_port.cpp`) — silently worked on host because glibc's
+  headers transitively pull in `<cerrno>`; bionic's don't. Fixed both
+  (scanned the rest of the tree for the same pattern — clean).
+- Link failure: `undefined reference to __android_log_print` from
+  `log_packet.o`. Root cause: `log_packet_helper.h:23-26` redefines
+  `printf()` to `__android_log_print()` whenever `__ANDROID__` is defined
+  (legacy code, predates this migration) — true for every NDK clang
+  invocation but never true on the host build, so this path had never been
+  exercised. `__android_log_print` lives in `liblog.so`, not libc. Fixed by
+  adding `LDFLAGS += -llog` to `android.mk`'s android branch.
+- Both fixes are host-invisible (guarded by `TARGET=android` or genuinely
+  missing includes that host headers papered over) — host rebuild
+  reconfirmed clean after each.
 
 **Step 5 — AndroidMtkMonitor + MtkMuxrawSource + MtkDecoder**
 Largest piece: `MtkDecoder` has no C++ reference — `mtk_log_parser.py` must
