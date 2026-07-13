@@ -4,3 +4,5 @@ CLAUDE.md
 *.o
 *.so
 *.a
+
+ws_dissector/android_prebuilt/
