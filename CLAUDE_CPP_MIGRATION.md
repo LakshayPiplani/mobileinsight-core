@@ -3,6 +3,10 @@
 > **Decoder sub-plan:** the full detail of removing `PyObject*` from the
 > decoder layer — `FieldValue` design, substitution map, phase order, special
 > cases — lives in [CLAUDE_DECODER_CPP_MIGRATION.md](CLAUDE_DECODER_CPP_MIGRATION.md).
+>
+> **ws_dissector-on-Android sub-plan:** getting the ASN.1/RRC dissector
+> running on-device (prebuilt-artifact strategy, on-device probe, wiring into
+> `android_qc_capture`) lives in [CLAUDE_WS_ANDROID_PLAN.md](CLAUDE_WS_ANDROID_PLAN.md).
 
 Scope decision (confirmed with project owner, 2026-07-06): this is ultimately
 a full-stack migration (monitor layer **and** analyzers), but analyzers are
@@ -352,7 +356,7 @@ instantiates the correct one from `MonitorConfig` at runtime.
   with per-file decoder reset would need base-class changes. Revisit if
   needed.
 
-**Step 4 — AndroidQcMonitor + DiagFifoSource** ← 4a + 4b + local 4c done (2026-07-09); on-device validation pending
+**Step 4 — AndroidQcMonitor + DiagFifoSource** ✅ complete (2026-07-09/10) — 4a/4b/4c/4d + live on-device validation, see below
 
 Replaces `mobile_insight/monitor/android_dev_diag_monitor.py`. Requires a
 rooted Android device (`/dev/diag` is root-only); the `diag_revealer` helper
@@ -492,6 +496,22 @@ defaults; `ar rcs` became `$(AR) rcs`; examples' link lines gained
 - Both fixes are host-invisible (guarded by `TARGET=android` or genuinely
   missing includes that host headers papered over) — host rebuild
   reconfirmed clean after each.
+
+**Live on-device validation ✅ (2026-07-09/10):** `android_qc_capture` (cross-
+compiled, pushed to `/data/local/tmp`) run against the real `diag_revealer` +
+`/dev/diag` on the rooted phone via `su -c`, all-types whitelist. Result:
+**624 packets, all `ok=true` (zero decode failures)** — `Diag.cfg` 21 HDLC
+frames (matches the mock test exactly), diag_revealer's own on-disk
+`mi2log/0.mi2log` (111KB) confirms the real relay ran. Decoded content is
+genuine live modem state: `UMTS_NAS_MM_State`/`GMM_State` transitions
+(MM_NULL → MM_WAIT_FOR_RR_ACTIVE → MM_IDLE, GMM_DEREGISTERED), `5G_NR_NAS_MM5G_State`,
+plus PHY/MAC volume (265× `5G_NR_MAC_UL_TB_Stats`, 265× `5G_NR_MAC_PDSCH_Stats`,
+64× `5G_NR_LL1_FW_Serving_FTL`, 10× `5G_NR_ML1_Searcher_Measurement_Database_Update_Ext`).
+This closes Step 4's last open item — the full pipeline (`/dev/diag` →
+diag_revealer → FIFO chronicle → `DiagFifoSource` → `QualcommDecoder` →
+`DecodedPacket`) is proven on real hardware, not just the mock.
+
+**Step 4 is now fully complete.**
 
 **Step 5 — AndroidMtkMonitor + MtkMuxrawSource + MtkDecoder**
 Largest piece: `MtkDecoder` has no C++ reference — `mtk_log_parser.py` must

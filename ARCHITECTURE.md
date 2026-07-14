@@ -107,7 +107,7 @@ Modem / .mi2log file
 | `OfflineReplayer` | `mobile_insight/monitor/offline_replayer.py` | Replays `.mi2log` / `.qmdl` files. Primary tool for offline analysis. |
 | `OnlineMonitor` | `mobile_insight/monitor/online_monitor.py` | Live serial DM device monitor. |
 | `DMLogPacket` | `mobile_insight/monitor/dm_collector/dm_endec/dm_log_packet.py` | Python wrapper around the dict returned by `dm_collector_c`. Optionally invokes `ws_dissector`. |
-| `WsDissector` | `mobile_insight/monitor/dm_collector/dm_endec/ws_dissector.py` | Subprocess bridge to the `ws_dissector` binary for ASN.1/RRC XML decoding. |
+| `WsDissector` | `mobile_insight/monitor/dm_collector/dm_endec/ws_dissector.py` | Subprocess bridge to the `ws_dissector` binary for ASN.1/RRC XML decoding. C++ replacement: `ws_dissector_client/`. Android on-device plan: [CLAUDE_WS_ANDROID_PLAN.md](CLAUDE_WS_ANDROID_PLAN.md). |
 | `Analyzer` | `mobile_insight/analyzer/analyzer.py` | Base consumer. Manages singleton registry, `include_analyzer` dependency wiring, `set_source`. |
 | `ProtocolAnalyzer` | `mobile_insight/analyzer/protocol_analyzer.py` | Adds `Profile` (config tracking) and `StateMachine` (protocol state) to `Analyzer`. |
 | `LteRrcAnalyzer` | `mobile_insight/analyzer/lte_rrc_analyzer.py` | Parses LTE RRC XML; drives RRC state machine; emits decoded events downstream. |

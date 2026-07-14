@@ -396,7 +396,10 @@ export_manager/
     AWW number. `examples/replay_mi2log.cpp` calls it to expand each `raw_msg`
     field (additive; hex-only when no dissector configured). Built + tested
     against a mock (scratchpad); the real libwireshark `ws_dissector/` binary is
-    not built on the dev box (runs on the Vagrant VM). What remains for full
+    not built on the dev box (runs on the Vagrant VM). Getting this running on
+    a live **Android** device (prebuilt-artifact strategy, no cross-compile
+    needed) is scoped separately in
+    [CLAUDE_WS_ANDROID_PLAN.md](CLAUDE_WS_ANDROID_PLAN.md). What remains for full
     "port": parse the returned PDML XML and splice it back into `FieldList` as a
     sub-tree, replacing the raw bytes entry in-decoder.
 - **Python facade (Step 6 in parent plan):** a thin layer that walks

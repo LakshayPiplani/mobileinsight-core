@@ -1,4 +1,5 @@
-#! /usr/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
 echo "Cloning pre-built wireshark executable and supporting binaries"
 
@@ -40,5 +41,15 @@ cp ${temp_dir}/bin/android_pie_ws_dissector ${destination_dir}/bin
 
 rm -rf ${temp_dir}
 
+echo ""
+echo "=== self-check: file types (expect ELF 32-bit LSB ..., ARM, EABI5 for all 9) ==="
+file ${destination_dir}/lib/*.so ${destination_dir}/bin/*
 
+echo ""
+echo "=== self-check: NEEDED entries for android_pie_ws_dissector ==="
+echo "(expect exactly: libwireshark.so, libwiretap.so, libwsutil.so, libglib-2.0.so, libm.so, libc.so, libdl.so)"
+readelf -d ${destination_dir}/bin/android_pie_ws_dissector | grep NEEDED
+
+echo ""
+echo "Done. Artifacts in ${destination_dir}/ (gitignored, not committed)."
 
