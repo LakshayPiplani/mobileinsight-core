@@ -39,8 +39,8 @@ serialtest: serialtest.cpp deps
 android_qc_capture: android_qc_capture.cpp deps
 	$(CXX) $(CXXFLAGS) android_qc_capture.cpp $(MONITOR_OBJS) $(LIBS) $(LDFLAGS) -o $@
 
-android_ws_dissector probe: android_ws_dissector.cpp deps
-        $(CXX) $(CXXFLAGS) android_ws_dissector.cpp ../ws_dissector_client/ws_dissector_client.a $(LDFLAGS) -o $@
+android_ws_dissector_probe: android_ws_dissector_probe.cpp deps
+        $(CXX) $(CXXFLAGS) android_ws_dissector_probe.cpp ../ws_dissector_client/libws_dissector_client.a $(LDFLAGS) -o $@
 
 clean:
 	rm -f replay_mi2log serialtest android_qc_capture decoded_packets.txt android_ws_dissector
