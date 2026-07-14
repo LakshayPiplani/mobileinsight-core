@@ -4,7 +4,7 @@
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        fprintf(stderr, "usage: exe_name <path to ws dissector bin> <path to libs for ws>");
+        fprintf(stderr, "usage: exe_name <path to ws dissector bin> <path to libs for ws>\n");
         return 1;
     }
 
@@ -16,7 +16,7 @@ int main(int argc, char** argv) {
     WsDissector ws;
 
     if (!ws.start(android_pie_ws_dissector, lib_path)) {
-        fprintf(stderr, "fail: cloud not start WS on Android");
+        fprintf(stderr, "FAIL: could not start ws_dissector\n");
         return 1;
     }
 

@@ -24,7 +24,7 @@ DEPDIRS := ../bytes_proto/qualcomm \
            ../decoder/qualcomm_decoder \
            ../monitor_c
 
-all: replay_mi2log serialtest android_qc_capture android_ws_dissector
+all: replay_mi2log serialtest android_qc_capture android_ws_dissector_probe
 
 .PHONY: deps
 deps:
@@ -40,10 +40,10 @@ android_qc_capture: android_qc_capture.cpp deps
 	$(CXX) $(CXXFLAGS) android_qc_capture.cpp $(MONITOR_OBJS) $(LIBS) $(LDFLAGS) -o $@
 
 android_ws_dissector_probe: android_ws_dissector_probe.cpp deps
-        $(CXX) $(CXXFLAGS) android_ws_dissector_probe.cpp ../ws_dissector_client/libws_dissector_client.a $(LDFLAGS) -o $@
+	$(CXX) $(CXXFLAGS) android_ws_dissector_probe.cpp ../ws_dissector_client/libws_dissector_client.a $(LDFLAGS) -o $@
 
 clean:
-	rm -f replay_mi2log serialtest android_qc_capture decoded_packets.txt android_ws_dissector
+	rm -f replay_mi2log serialtest android_qc_capture decoded_packets.txt android_ws_dissector_probe
 
 # Also clean the prerequisite libraries.
 clean-all: clean
