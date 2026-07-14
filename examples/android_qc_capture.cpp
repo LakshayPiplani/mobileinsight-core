@@ -19,6 +19,7 @@
 
 #include "../monitor_c/android_qc_monitor.h"
 #include "../bytes_proto/qualcomm/consts.h"
+#include "../ws_dissector_client/ws_dissector_client.h"
 
 #include <cstdio>
 #include <cstdint>
@@ -28,7 +29,16 @@
 #include <string>
 #include <vector>
 
-static void dump_fields(std::ofstream &out, const FieldList &fields, int indent) {
+// Protocol name carried by a raw_msg type_hint ("raw_msg/PROTO" -> "PROTO"),
+// or "" if the hint is not a raw_msg.
+static std::string raw_msg_proto(const std::string &type_hint) {
+    const std::string prefix = "raw_msg/";
+    if (type_hint.compare(0, prefix.size(), prefix) == 0)
+        return type_hint.substr(prefix.size());
+    return "";
+}
+
+static void dump_fields(std::ofstream &out, const FieldList &fields, int indent, WsDissector* ws) {
     const std::string pad(indent * 2, ' ');
     for (const FieldEntry &e : fields) {
         out << pad << e.name;
@@ -49,9 +59,28 @@ static void dump_fields(std::ofstream &out, const FieldList &fields, int indent)
                 out << hex;
             }
             out << "\n";
+
+            // Expand a raw_msg PDU via ws_dissector, if one is available.
+            std::string proto = raw_msg_proto(e.type_hint);
+            if (ws && ws->is_running() && !proto.empty() && !raw->empty()) {
+                std::string xml = ws->decode(proto, raw->data(), raw->size());
+                if (!xml.empty()) {
+                        out << pad << "  --- ws_dissector (" << proto << ") ---\n";
+                        std::istringstream iss(xml);
+                        std::string line;
+                        while (std::getline(iss, line))
+                            out << pad << "  " << line << "\n";
+                    } else {
+                        out << pad << "  --- ws_dissector: no output for "
+                            << proto << " ---\n";
+                    }
+            }
         } else if (const auto *sub = std::get_if<FieldList>(&e.value.data)) {
             out << "\n";
-            dump_fields(out, *sub, indent + 1);
+            dump_fields(out, *sub, indent + 1, ws);
+        } else if (const auto *sub = std::get_if<FieldList>(&e.value.data)) {
+            out << "\n";
+            dump_fields(out, *sub, indent + 1, ws);
         }
     }
 }
@@ -76,7 +105,7 @@ int main(int argc, char **argv) {
         else pos.push_back(a);
     }
     if (pos.empty()) {
-        fprintf(stderr, "usage: %s <diag_revealer> [fifo] [diag_cfg] [log_dir] [out] [-v] [--no-su]\n",
+        fprintf(stderr, "usage: %s <diag_revealer> [fifo] [diag_cfg] [log_dir] [android_pie_ws_dissector] [ws libs] [out] [-v] [--no-su]\n",
                 argv[0]);
         return 1;
     }
@@ -89,7 +118,10 @@ int main(int argc, char **argv) {
     params.use_su        = use_su;
     if (!use_su)
         params.shell_path = "/bin/sh";   // desktop mock run; no /system/bin/sh
-    const std::string out_path = pos.size() > 4 ? pos[4] : "android_decoded.txt";
+    const std::string ws_path = pos.size() > 4 ? pos[4] : "/data/local/tmp/ws_tester/ws_dissector/android_pie_ws_dissector";
+    const std::string ws_lib = pos.size() > 5 ? pos[5] : "/data/local/tmp/ws_tester/ws_dissector/lib/";
+    const std::string out_path = pos.size() > 6 ? pos[6] : "android_decoded.txt";
+
 
     // Whitelist every known type, same as replay_mi2log.cpp, so packet
     // counts from a mock replay are directly comparable. For a real capture
@@ -107,6 +139,38 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+
+    //Create a WsDissector
+    WsDissector ws;
+    WsDissector *wsp = nullptr;
+    if (ws_path.empty()) {
+        fprintf(stderr, "[ws_dissector] no path given (argv[3] / $WS_DISSECTOR); "
+                        "raw_msg fields -> hex only\n");
+    } else {
+        fprintf(stderr, "[ws_dissector] path = %s\n", ws_path.c_str());
+        fprintf(stderr, "[ws_dissector] lib  = %s\n", ws_lib.empty() ? "(default loader path)" : ws_lib.c_str());
+        // Is the binary actually there and executable?
+        if (access(ws_path.c_str(), X_OK) != 0) {
+            perror("[ws_dissector] access");
+            fprintf(stderr, "[ws_dissector] executable not found/executable; raw_msg -> hex only\n");
+        } else if (!ws.start(ws_path, ws_lib)) {
+            fprintf(stderr, "[ws_dissector] fork/exec failed; raw_msg -> hex only\n");
+        } else {
+            // start() only forked; exec failure shows up as a dead child.
+            // Probe with a tiny known message to confirm it actually responds.
+            const uint8_t probe[] = {0x7e, 0x00};   // NAS-5GS EPD byte + spare
+            std::string reply = ws.decode("nas-5gs", probe, sizeof(probe));
+            if (reply.empty()) {
+                fprintf(stderr, "[ws_dissector] started but no response to probe "
+                                "(bad binary or missing libwireshark?); raw_msg -> hex only\n");
+                ws.stop();
+            } else {
+                wsp = &ws;
+                fprintf(stderr, "[ws_dissector] OK - process responded to probe "
+                                "(%zu bytes of PDML); dissection ENABLED\n", reply.size());
+            }
+        }
+    }
     int n_packets = 0;
     auto handler = [&](const DecodedPacket &pkt) -> bool {
         ++n_packets;
@@ -115,7 +179,7 @@ int main(int argc, char **argv) {
             << " | ok=" << (pkt.ok ? "true" : "false")
             << " | recv_timestamp=" << std::fixed << std::setprecision(6)
             << pkt.timestamp << " =====\n";
-        dump_fields(out, pkt.fields, 0);
+        dump_fields(out, pkt.fields, 0, wsp);
         out << "\n";
         // Live capture ends with Ctrl-C, before ~ofstream flushes.
         out.flush();
