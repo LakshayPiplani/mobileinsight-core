@@ -4,13 +4,18 @@
  * decodes, and dumps every DecodedPacket to a text file.
  *
  * Usage:
- *   android_qc_capture <diag_revealer> [fifo] [diag_cfg] [log_dir] [out] [-v] [--no-su]
+ *   android_qc_capture <diag_revealer> [fifo] [diag_cfg] [log_dir] \
+ *                      [ws_dissector_exe] [ws_dissector_lib_dir] [out] [-v] [--no-su]
  *
  * Defaults are relative paths suitable for an on-device shell session:
  *   fifo     ./diag_revealer_fifo
  *   diag_cfg ./Diag.cfg
  *   log_dir  ./mi2log
  *   out      android_decoded.txt
+ *
+ * ws_dissector_exe/ws_dissector_lib_dir fall back to $WS_DISSECTOR /
+ * $WS_DISSECTOR_LIB if not given; if neither is set, raw_msg fields are
+ * dumped as hex only (dissection stays optional, same as serialtest.cpp).
  *
  * --no-su spawns diag_revealer directly through /bin/sh instead of
  * `su -c` via /system/bin/sh -- for desktop testing against a mock
@@ -28,6 +33,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <unistd.h>
+#include <sstream>
 
 // Protocol name carried by a raw_msg type_hint ("raw_msg/PROTO" -> "PROTO"),
 // or "" if the hint is not a raw_msg.
@@ -78,9 +85,6 @@ static void dump_fields(std::ofstream &out, const FieldList &fields, int indent,
         } else if (const auto *sub = std::get_if<FieldList>(&e.value.data)) {
             out << "\n";
             dump_fields(out, *sub, indent + 1, ws);
-        } else if (const auto *sub = std::get_if<FieldList>(&e.value.data)) {
-            out << "\n";
-            dump_fields(out, *sub, indent + 1, ws);
         }
     }
 }
@@ -118,8 +122,8 @@ int main(int argc, char **argv) {
     params.use_su        = use_su;
     if (!use_su)
         params.shell_path = "/bin/sh";   // desktop mock run; no /system/bin/sh
-    const std::string ws_path = pos.size() > 4 ? pos[4] : "/data/local/tmp/ws_tester/ws_dissector/android_pie_ws_dissector";
-    const std::string ws_lib = pos.size() > 5 ? pos[5] : "/data/local/tmp/ws_tester/ws_dissector/lib/";
+    const std::string ws_path = pos.size() > 4 ? pos[4] : (getenv("WS_DISSECTOR") ? getenv("WS_DISSECTOR") : "");
+    const std::string ws_lib = pos.size() > 5 ? pos[5] : (getenv("WS_DISSECTOR_LIB") ? getenv("WS_DISSECTOR_LIB") : "");
     const std::string out_path = pos.size() > 6 ? pos[6] : "android_decoded.txt";
 
 
@@ -144,7 +148,7 @@ int main(int argc, char **argv) {
     WsDissector ws;
     WsDissector *wsp = nullptr;
     if (ws_path.empty()) {
-        fprintf(stderr, "[ws_dissector] no path given (argv[3] / $WS_DISSECTOR); "
+        fprintf(stderr, "[ws_dissector] no path given (5th positional arg / $WS_DISSECTOR); "
                         "raw_msg fields -> hex only\n");
     } else {
         fprintf(stderr, "[ws_dissector] path = %s\n", ws_path.c_str());
