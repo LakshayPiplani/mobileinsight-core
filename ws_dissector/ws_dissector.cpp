@@ -1,6 +1,6 @@
 #include "config.h"
 
-#include <pcap.h>
+// #include <pcap.h>
 #include <epan/epan.h>
 #include <epan/prefs.h>
 #include <epan/epan_dissect.h>
