@@ -9587,11 +9587,15 @@ on_demand_decode (const char *b, size_t length, LogPacketType type_id, FieldList
 
 
         case NR_MAC_UL_TB_Stats:
+            result.push_back({"Raw NR_MAC_UL_TB_Stats Payload",
+            FieldValue{std::vector<uint8_t>((const uint8_t*)b, (const uint8_t*)b + length)},
+            "bytes"}); 
             offset += _decode_by_fmt(NrMacUlTbStats_Fmt,
                                      ARRAY_SIZE(NrMacUlTbStats_Fmt, Fmt),
                                      b, offset, length, result);
-
+            
             offset += _decode_nr_mac_ul_tb_stats_subpkt(b, offset, length, result);
+            result.push_back({"Remaining length", FieldValue{int64_t(length)-int64_t(offset)}, ""});
 
             break;
 

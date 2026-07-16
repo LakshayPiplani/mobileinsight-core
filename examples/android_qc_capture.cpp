@@ -136,11 +136,13 @@ int main(int argc, char **argv) {
     cfg.perf_interval = 10;
     // for (int i = 0; i < LogPacketTypeID_To_Name_n; i++)
     //     cfg.type_names.push_back(LogPacketTypeID_To_Name[i].name);
-    cfg.type_names.push_back(std::string("5G_NR_RRC_OTA_Packet"));
-    cfg.type_names.push_back(std::string("5G_NR_NAS_SM_Plain_OTA_Incoming_Msg"));
-    cfg.type_names.push_back(std::string("5G_NR_NAS_SM_Plain_OTA_Outgoing_Msg"));
-    cfg.type_names.push_back(std::string("5G_NR_NAS_MM_Plain_OTA_Incoming_Msg"));
-    cfg.type_names.push_back(std::string("5G_NR_NAS_MM_Plain_OTA_Outgoing_Msg"));
+    // cfg.type_names.push_back(std::string("5G_NR_RRC_OTA_Packet"));
+    // cfg.type_names.push_back(std::string("5G_NR_NAS_SM_Plain_OTA_Incoming_Msg"));
+    // cfg.type_names.push_back(std::string("5G_NR_NAS_SM_Plain_OTA_Outgoing_Msg"));
+    // cfg.type_names.push_back(std::string("5G_NR_NAS_MM_Plain_OTA_Incoming_Msg"));
+    // cfg.type_names.push_back(std::string("5G_NR_NAS_MM_Plain_OTA_Outgoing_Msg"));
+    cfg.type_names.push_back(std::string("5G_NR_MAC_UL_TB_Stats"));
+    cfg.type_names.push_back(std::string("5G_NR_L2_UL_TB"));
 
 
     std::ofstream out(out_path);
