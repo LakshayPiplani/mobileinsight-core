@@ -36,6 +36,10 @@ Wireshark dissector preferences (e.g. NAS-5GS's "Try to detect and decode 5G-EA0
 
 ## Build
 
+There are two separate builds from the same source; see [../CLAUDE_ANDROID_WS_BUILD.md](../CLAUDE_ANDROID_WS_BUILD.md) for how they differ.
+
+### Desktop (x86)
+
 See the `g++` invocation in [install-ubuntu.sh](../install-ubuntu.sh) (links against `-lwireshark -lwsutil -lwiretap`, headers from the bundled Wireshark 3.4.0 source tree). To rebuild after editing these files without rerunning the full installer:
 
 ```
@@ -44,3 +48,7 @@ g++ ws_dissector.cpp packet-aww.cpp -o ws_dissector $(pkg-config --libs --cflags
     -I"$WIRESHARK_SRC_PATH" -L/usr/local/lib -lwireshark -lwsutil -lwiretap
 sudo cp ws_dissector /usr/local/bin/
 ```
+
+### Android (arm32)
+
+Run [build-android.sh](build-android.sh) (NDK clang; links the prebuilt arm32 `.so`s in `android_prebuilt/`; output to `android_build/`). Full recipe and reasoning in [../CLAUDE_ANDROID_WS_BUILD.md](../CLAUDE_ANDROID_WS_BUILD.md).

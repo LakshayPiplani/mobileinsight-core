@@ -1,6 +1,9 @@
 #include "config.h"
 
-// #include <pcap.h>
+// #include <pcap.h>   // dead include: no pcap API is used (the only DLT reference
+//                     // is a Wireshark user-DLT *preference* string, not libpcap).
+//                     // Kept commented for provenance; dropping it also lets the
+//                     // Android cross-build avoid needing libpcap headers.
 #include <epan/epan.h>
 #include <epan/prefs.h>
 #include <epan/epan_dissect.h>

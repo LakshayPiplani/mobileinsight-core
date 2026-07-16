@@ -6,3 +6,4 @@ CLAUDE.md
 *.a
 
 ws_dissector/android_prebuilt/
+ws_dissector/android_build/

@@ -14,6 +14,8 @@ Standalone `nas-5gs` packets (5G NAS OTA container, AWW **protocol 416**) come b
 
 # SOLUTION (reproducible recipe)
 
+> **Automated:** the whole recipe below is encapsulated in **`ws_dissector/build-android.sh`** — the Android build entrypoint (separate from the desktop `make ws_dissector` / `install-ubuntu.sh`). Normal use: set `NDK`/`API`/`WS_SRC`/`GLIB_SRC` if they differ from the VM defaults, then run `./ws_dissector/build-android.sh`. It generates `glibconfig.h` if missing, derives the Android `config.h` (step 3, without touching the shared tree), fetches the prebuilt `.so`s, compiles, and verifies the fix is present. The steps below are the by-hand equivalent, kept for understanding.
+
 All commands run on the build **VM** unless noted. Concrete paths are the ones used on this VM.
 
 ### Prerequisites (one-time host setup)
@@ -75,24 +77,20 @@ LIBFFI_CFLAGS=" " LIBFFI_LIBS=" " \
 
 Verify: `grep GLIB_SIZEOF_VOID_P glib/glibconfig.h` → must be **4** (32-bit ARM).
 
-### 3. Fix the reused x86 Wireshark `config.h`
+### 3. Provide an Android `config.h` (without mutating the shared Wireshark tree)
 
-The `wireshark-3.4.0/config.h` was generated for the x86-64 desktop build and defines an Intel-only flag that drags in x86 SIMD headers. Edit `~/mi-dev/mobileinsight-core/wireshark-3.4.0/config.h`, changing:
-
-```c
-#define HAVE_SSE4_2 1
+The `wireshark-3.4.0/config.h` was generated for the x86-64 desktop build and defines an Intel-only flag (`HAVE_SSE4_2`) that drags in x86 SIMD headers. **`build-android.sh` derives a copy** into `android_build/config.h` with that flag off and puts it *first* on the include path so it shadows Wireshark's — the shared tree stays pristine:
+```bash
+sed 's|^#define HAVE_SSE4_2 1|/* #undef HAVE_SSE4_2 */|' "$WS_SRC/config.h" > android_build/config.h
 ```
-to:
-```c
-/* #undef HAVE_SSE4_2 */
-```
+(The by-hand alternative is to edit `HAVE_SSE4_2` out of `wireshark-3.4.0/config.h` in place, but that mutates a tree the desktop build may share — prefer the shadow.) Note: a command-line `-U`/`-D` can't do this, because the source `#include "config.h"` re-defines the macro.
 
-### 4. Remove the dead pcap include
+### 4. The dead pcap include (already handled in source)
 
-`<pcap.h>` is included but never used (the only DLT reference is a Wireshark *preference string*, `DLT=148`, not the pcap API). Delete this line from `ws_dissector.cpp`:
+`<pcap.h>` is included but never used (the only DLT reference is a Wireshark *preference string*, `DLT=148`, not the pcap API). It is **commented out** in `ws_dissector.cpp` (kept for provenance) — no action needed:
 
 ```c
-#include <pcap.h>
+// #include <pcap.h>
 ```
 
 ### 5. Cross-compile and link
@@ -175,7 +173,7 @@ Also passed via env vars / flags rather than cache: `LIBFFI_CFLAGS=" " LIBFFI_LI
 
 ## Two more compile-time snags
 
-- **x86 `config.h`**: the reused `wireshark-3.4.0/config.h` is the desktop build's, and `#define HAVE_SSE4_2 1` made `wsutil/ws_mempbrk.h` include `<emmintrin.h>` → x86 `__builtin_ia32_*` errors on ARM. Fix = un-define it in `config.h` (Wireshark has a portable `ws_mempbrk` fallback). Note: a command-line `-UHAVE_SSE4_2` does **not** work, because the source `#include "config.h"` re-defines it — the edit must be in `config.h` itself.
+- **x86 `config.h`**: the reused `wireshark-3.4.0/config.h` is the desktop build's, and `#define HAVE_SSE4_2 1` made `wsutil/ws_mempbrk.h` include `<emmintrin.h>` → x86 `__builtin_ia32_*` errors on ARM. Fix = un-define it in `config.h` (Wireshark has a portable `ws_mempbrk` fallback). Note: a command-line `-UHAVE_SSE4_2` does **not** work, because the source `#include "config.h"` re-defines it — the fix must live in a `config.h` file. `build-android.sh` does this by shadowing with a derived `android_build/config.h` (step 3), not by mutating the shared tree.
 - **Dead pcap include**: `ws_dissector.cpp` had `#include <pcap.h>` but uses no pcap API (`grep` confirmed the only match is the include line; the `DLT=148` you may remember is a Wireshark *preference string* for the user-DLT table, not the pcap macro). Removed the include rather than expose the whole host `/usr/include` (which would risk the cross-compile picking up host system headers).
 
 ## Include-path assembly
@@ -192,6 +190,12 @@ Rather than assume, we **verified the device**: API **30** (Android 11), ABI lis
 ---
 
 # On-device verification (Step 5)
+
+> **Capture front-end prerequisites (device-dependent; independent of the EA0 fix).** The DIAG capture — not the ws_dissector fix — needs:
+> 1. **Root.** On Enforcing-SELinux devices the `shell` domain can't create the DIAG FIFO (`avc: denied { create } … tclass=fifo_file`), and `/dev/diag` needs root anyway — run the whole `android_qc_capture` under `su`.
+> 2. **A Qualcomm chipset with the `diagchar` kernel driver**, which creates `/dev/diag`. Confirm with `cat /proc/devices | grep diag` (a registered major) and `ls /dev/diag`. Newer **GKI** kernels (e.g. SM8450 / Snapdragon 8 Gen 1, Android 12–13) often ship *without* `diagchar` — only the `usb_f_diag` USB-gadget module (the `ffs-diag*` nodes), which streams DIAG to a **tethered host**, not an on-device `/dev/diag`. On such phones `mknod` can't help (no driver behind it); on-device capture needs a custom kernel, else use **USB-tethered** capture from a host PC. The Nord (used for the ✅ run below) has `diagchar`; the SM8450 "hiphi" does not.
+>
+> The ws_dissector/EA0 fix is capture-source-independent — it decodes whatever DIAG bytes reach it, tethered or on-device.
 
 **Actual device layout** (on the connected "Nord" phone; base dir is `/data/local/tmp/ws_tester/`, *not* the `/data/local/tmp/mi/` the parent plan sketched):
 ```
@@ -235,9 +239,26 @@ cd /data/local/tmp/ws_tester/ws_dissector
 mv android_pie_ws_dissector android_pie_ws_dissector.orig
 cp android_pie_ws_dissector_v2 android_pie_ws_dissector
 chmod 755 android_pie_ws_dissector
-# then, from /data/local/tmp/ws_tester/, re-run android_qc_capture into a new out file
 ```
-`android_qc_capture` regenerates `Diag.cfg` on each run from the 5G `type_names` compiled into [android_qc_capture.cpp:139-143](examples/android_qc_capture.cpp#L139-L143) (`AndroidQcMonitor::setup()` → `generate_diag_cfg()`, overwrite) — so the `../Diag.cfg` arg is a *write target*, not a supplied file; a clean A/B comes from reusing the same `android_qc_capture` binary, not from preserving the file.
+
+Then run the capture. Usage is `android_qc_capture <diag_revealer> [fifo] [diag_cfg] [log_dir] [ws_dissector_exe] [ws_dissector_lib_dir] [out] [-v] [--no-su]` ([android_qc_capture.cpp:6-22](examples/android_qc_capture.cpp#L6-L22)). The exact command used, run **from `/data/local/tmp/ws_tester/`** in an `adb shell` (as root — `/dev/diag` needs it; **no** `--no-su` on the real phone):
+
+```bash
+adb shell
+cd /data/local/tmp/ws_tester/
+./android_qc_capture \
+    ../diag_revealer \                          # <diag_revealer>  helper that plays Diag.cfg into /dev/diag and reads the stream
+    ../diag_revealer_fifo \                      # [fifo]           chronicle FIFO the monitor reads
+    ../Diag.cfg \                                # [diag_cfg]       WRITE TARGET — regenerated from type_names each run (see below)
+    ./mi2log \                                   # [log_dir]        diag_revealer's own .mi2log output dir
+    ./ws_dissector/android_pie_ws_dissector \    # [ws_dissector_exe]     the swapped-in fixed binary
+    ./ws_dissector/lib \                         # [ws_dissector_lib_dir] LD_LIBRARY_PATH for the arm32 .so's
+    out_with_ws_narrowed_v2.txt \                # [out]            decoded output file
+    -v                                           # verbose
+# capture runs until Ctrl-C; drive live 5G NAS signaling (register / security mode) meanwhile
+```
+
+`android_qc_capture` regenerates `Diag.cfg` on each run from the 5G `type_names` compiled into [android_qc_capture.cpp:139-143](examples/android_qc_capture.cpp#L139-L143) (`AndroidQcMonitor::setup()` → `generate_diag_cfg()`, overwrite) — so the `../Diag.cfg` arg is a *write target*, not a supplied file; a clean A/B comes from reusing the same `android_qc_capture` binary (same `type_names`), not from preserving the file. `ws_dissector_exe`/`_lib_dir` may also be supplied via `$WS_DISSECTOR` / `$WS_DISSECTOR_LIB` env vars instead of positional args.
 
 **Result** (`out_with_ws_narrowed_v2.txt`): **0** × `fails to decode protocol 416` (buggy baseline `logs_out_with_ws_narrowed.txt` had 36), and the full 5G NAS sequence decodes with real content — `Registration request/accept/complete`, `Authentication request/response`, `Identity request/response`, `Security mode command/complete`, `Configuration update command`, `DL/UL NAS transport`, `Deregistration`. A `Security mode complete` packet dissects end-to-end (decoded `IMEISV`, nested `NAS message container` → `Registration request`), proving the post-security-mode EA0-marked-plain messages now decode. Note: baseline and fixed runs are separate live captures (different signaling, 84 vs 46 packets), so this is a "works now" confirmation, not a byte-identical diff.
 
@@ -260,9 +281,10 @@ chmod 755 android_pie_ws_dissector
 
 ## Critical files
 
-- `ws_dissector/ws_dissector.cpp` (pref-setting at `:154-161`; removed dead `#include <pcap.h>`), `ws_dissector/packet-aww.cpp` — the two recompiled files
+- `ws_dissector/ws_dissector.cpp` (pref-setting at `:154-161`; dead `#include <pcap.h>` commented out), `ws_dissector/packet-aww.cpp` — the two recompiled files
 - `ws_dissector/android_prebuilt/lib/*.so` — prebuilt arm32 libs (verified to contain `null_decipher`)
 - `~/mi-dev/mobileinsight-core/glib-2.54.3/android.cache` — the 21-line cross-compile cache
-- `~/mi-dev/mobileinsight-core/wireshark-3.4.0/config.h` — edited to un-define `HAVE_SSE4_2`
+- `ws_dissector/build-android.sh` — the Android build entrypoint (encapsulates this whole recipe)
+- `ws_dissector/android_build/config.h` — Android `config.h` derived by the script (`HAVE_SSE4_2` off); shadows, does not replace, `wireshark-3.4.0/config.h`
 - `examples/android_ws_dissector_probe.cpp` — the go/no-go probe
 - <https://zwyuan.github.io/2016/07/17/cross-compile-glib-for-android/> — source of `android.cache`
